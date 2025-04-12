@@ -2,7 +2,6 @@ streamlit
 pandas
 openpyxl
 plotly
-streamlit-webrtc
-pyzbar
 opencv-python-headless
 numpy
+streamlit-webrtc
