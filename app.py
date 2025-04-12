@@ -40,7 +40,6 @@ st.title("Demontageplanung – Automobil Kreislaufwirtschaft")
 datafile = "fahrzeuge_daten.csv"
 stationen = ['Flüssigkeiten ablassen', 'Batterie entfernen', 'Räder demontieren', 'Innenraumteile ausbauen', 'Karosserie zerlegen']
 
-# Fahrzeugdaten laden
 if 'fahrzeuge' not in st.session_state:
     if os.path.exists(datafile):
         st.session_state.fahrzeuge = pd.read_csv(datafile).to_dict(orient="records")
@@ -71,7 +70,7 @@ fig = px.bar(x=["Offen", "In Arbeit", "Abgeschlossen"],
 fig.update_layout(showlegend=False)
 st.plotly_chart(fig, use_container_width=True)
 
-# Kamera-QR-Scan mit OpenCV QRCodeDetector
+# QR-Scan Webcam (OpenCV)
 st.subheader("📷 Fahrzeug per QR-Code scannen")
 if "qr_result" not in st.session_state:
     st.session_state.qr_result = ""
@@ -82,11 +81,13 @@ class QRProcessor(VideoProcessorBase):
 
     def recv(self, frame):
         img = frame.to_ndarray(format="bgr24")
-        data, bbox, _ = self.detector.detectAndDecode(img)
-        if bbox is not None and data:
-            st.session_state.qr_result = data
-            pts = np.int32(bbox).reshape((-1, 1, 2))
-            img = cv2.polylines(img, [pts], True, (0, 255, 0), 2)
+        qr_data, bbox, _ = self.detector.detectAndDecode(img)
+        if bbox is not None and qr_data:
+            st.session_state.qr_result = qr_data
+            for i in range(len(bbox)):
+                pt1 = tuple(bbox[i][0])
+                pt2 = tuple(bbox[(i + 1) % len(bbox)][0])
+                cv2.line(img, (int(pt1[0]), int(pt1[1])), (int(pt2[0]), int(pt2[1])), (0, 255, 0), 2)
         return av.VideoFrame.from_ndarray(img, format="bgr24")
 
 webrtc_streamer(
@@ -99,7 +100,7 @@ webrtc_streamer(
 if st.session_state.qr_result:
     st.success(f"Erkannter QR-Code: {st.session_state.qr_result}")
 
-# Fahrzeug manuell oder mit QR hinzufügen
+# Fahrzeug hinzufügen
 st.subheader("🚗 Fahrzeug hinzufügen")
 fahrzeugnummer = st.text_input("Fahrzeugnummer", value=st.session_state.qr_result)
 ankunft = st.time_input("Ankunftszeit", value=datetime.strptime("08:00", "%H:%M").time())
@@ -120,7 +121,7 @@ if st.button("➕ Fahrzeug speichern"):
     st.session_state.qr_result = ""
     st.rerun()
 
-# Übersicht
+# Statusübersicht
 st.subheader("🔧 Fahrzeuge & Status")
 anzeige_fahrzeuge = []
 for i, fzg in enumerate(st.session_state.fahrzeuge):
@@ -155,7 +156,6 @@ for i, fzg in enumerate(st.session_state.fahrzeuge):
 if anzeige_fahrzeuge:
     st.dataframe(pd.DataFrame(anzeige_fahrzeuge))
 
-# Export
 if rolle == "Schichtleiter":
     if st.button("📤 Excel exportieren"):
         pd.DataFrame(st.session_state.fahrzeuge).to_excel("Demontage_Tagesplanung_WebApp.xlsx", index=False)
