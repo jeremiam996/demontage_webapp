@@ -3,20 +3,45 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime
 import os
-import matplotlib.pyplot as plt
+import plotly.express as px
+from streamlit_webrtc import webrtc_streamer, VideoProcessorBase, RTCConfiguration
+import av
+import cv2
+import numpy as np
+from pyzbar.pyzbar import decode
 
 st.set_page_config(layout="wide")
 
+# Benutzerverwaltung
+user_db = {
+    "schichtleiter": "pass123",
+    "werkstatt": "1234"
+}
+
+if "logged_in" not in st.session_state:
+    st.session_state.logged_in = False
+    st.session_state.user = ""
+
+if not st.session_state.logged_in:
+    st.title("🔐 Login")
+    username = st.text_input("Benutzername")
+    password = st.text_input("Passwort", type="password")
+    if st.button("Einloggen"):
+        if username in user_db and user_db[username] == password:
+            st.session_state.logged_in = True
+            st.session_state.user = username
+            st.rerun()
+        else:
+            st.error("Benutzername oder Passwort falsch.")
+    st.stop()
+
+rolle = "Schichtleiter" if st.session_state.user == "schichtleiter" else "Werkstattmitarbeiter"
 st.title("Demontageplanung – Automobil Kreislaufwirtschaft")
 
-stationen = ['Flüssigkeiten ablassen', 'Batterie entfernen', 'Räder demontieren',
-             'Innenraumteile ausbauen', 'Karosserie zerlegen']
 datafile = "fahrzeuge_daten.csv"
+stationen = ['Flüssigkeiten ablassen', 'Batterie entfernen', 'Räder demontieren', 'Innenraumteile ausbauen', 'Karosserie zerlegen']
 
-# Benutzerrolle
-rolle = st.sidebar.selectbox("🔐 Rolle wählen", ["Schichtleiter", "Werkstattmitarbeiter"])
-
-# Lade gespeicherte Daten
+# Fahrzeugdaten laden
 if 'fahrzeuge' not in st.session_state:
     if os.path.exists(datafile):
         st.session_state.fahrzeuge = pd.read_csv(datafile).to_dict(orient="records")
@@ -31,51 +56,71 @@ def berechne_fortschritt(status):
     else:
         return "In Arbeit"
 
-# Sidebar-Statistik
 fortschrittsliste = [berechne_fortschritt(fzg["Status"]) for fzg in st.session_state.fahrzeuge]
 gesamt = len(fortschrittsliste)
 offen = fortschrittsliste.count("Offen")
 in_arbeit = fortschrittsliste.count("In Arbeit")
 abgeschlossen = fortschrittsliste.count("Abgeschlossen")
 
-st.sidebar.markdown(f"**📊 Übersicht**")
-st.sidebar.markdown(f"- Gesamt: **{gesamt}**")
-st.sidebar.markdown(f"- 🕒 Offen: **{offen}**")
-st.sidebar.markdown(f"- 🔧 In Arbeit: **{in_arbeit}**")
-st.sidebar.markdown(f"- ✅ Abgeschlossen: **{abgeschlossen}**")
+# Fortschrittsdiagramm
+st.subheader("📊 Demontage-Fortschritt")
+fig = px.bar(x=["Offen", "In Arbeit", "Abgeschlossen"],
+             y=[offen, in_arbeit, abgeschlossen],
+             labels={"x": "Status", "y": "Anzahl Fahrzeuge"},
+             color=["Offen", "In Arbeit", "Abgeschlossen"],
+             text=[offen, in_arbeit, abgeschlossen])
+fig.update_layout(showlegend=False)
+st.plotly_chart(fig, use_container_width=True)
 
-# Diagramm anzeigen
-with st.expander("📈 Fortschrittsdiagramm"):
-    fig, ax = plt.subplots()
-    ax.bar(["Offen", "In Arbeit", "Abgeschlossen"], [offen, in_arbeit, abgeschlossen])
-    ax.set_ylabel("Anzahl Fahrzeuge")
-    ax.set_title("Demontage-Fortschritt")
-    st.pyplot(fig)
+# Kamera-QR-Scan
+st.subheader("📷 Fahrzeug per QR-Code scannen")
+if "qr_result" not in st.session_state:
+    st.session_state.qr_result = ""
 
-# Excel-Upload
-st.header("📥 Excel-Import für angelieferte Fahrzeuge")
-uploaded_file = st.file_uploader("Excel-Datei hochladen (.xlsx)", type=["xlsx"])
-if uploaded_file:
-    df_upload = pd.read_excel(uploaded_file)
-    st.dataframe(df_upload)
-    if st.button("In Planung übernehmen"):
-        for _, row in df_upload.iterrows():
-            neues_fahrzeug = {
-                "Fahrzeug": int(row["Fahrzeugnummer"]),
-                "Ankunftszeit": row["Ankunftszeit"],
-                "Schicht": row["Schicht"],
-                "Status": "Noch nicht begonnen",
-                "Begonnen": False,
-                "Hinzugefügt am": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            }
-            st.session_state.fahrzeuge.append(neues_fahrzeug)
-        pd.DataFrame(st.session_state.fahrzeuge).to_csv(datafile, index=False)
-        st.success("Import abgeschlossen.")
-       st.rerun()
+class QRProcessor(VideoProcessorBase):
+    def recv(self, frame):
+        img = frame.to_ndarray(format="bgr24")
+        decoded_objs = decode(img)
+        for obj in decoded_objs:
+            st.session_state.qr_result = obj.data.decode("utf-8")
+            pts = np.array([obj.polygon], np.int32)
+            pts = pts.reshape((-1, 1, 2))
+            img = cv2.polylines(img, [pts], True, (0, 255, 0), 2)
+        return av.VideoFrame.from_ndarray(img, format="bgr24")
 
-# Fahrzeuganzeige mit Rollenlogik
-st.header("🚗 Fahrzeugstatus bearbeiten")
+webrtc_streamer(
+    key="qrscan",
+    video_processor_factory=QRProcessor,
+    rtc_configuration=RTCConfiguration({"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]}),
+    media_stream_constraints={"video": True, "audio": False},
+)
 
+if st.session_state.qr_result:
+    st.success(f"Erkannter QR-Code: {st.session_state.qr_result}")
+
+# Fahrzeug manuell oder mit QR hinzufügen
+st.subheader("🚗 Fahrzeug hinzufügen")
+fahrzeugnummer = st.text_input("Fahrzeugnummer", value=st.session_state.qr_result)
+ankunft = st.time_input("Ankunftszeit", value=datetime.strptime("08:00", "%H:%M").time())
+schicht = st.selectbox("Schicht", ["Morgenschicht", "Spätschicht"])
+
+if st.button("➕ Fahrzeug speichern"):
+    neues_fzg = {
+        "Fahrzeug": int(fahrzeugnummer),
+        "Ankunftszeit": ankunft.strftime("%H:%M"),
+        "Schicht": schicht,
+        "Status": "Noch nicht begonnen",
+        "Begonnen": False,
+        "Hinzugefügt am": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    }
+    st.session_state.fahrzeuge.append(neues_fzg)
+    pd.DataFrame(st.session_state.fahrzeuge).to_csv(datafile, index=False)
+    st.success(f"Fahrzeug {fahrzeugnummer} gespeichert.")
+    st.session_state.qr_result = ""
+    st.rerun()
+
+# Übersicht
+st.subheader("🔧 Fahrzeuge & Status")
 anzeige_fahrzeuge = []
 for i, fzg in enumerate(st.session_state.fahrzeuge):
     fortschritt = berechne_fortschritt(fzg["Status"])
@@ -83,7 +128,7 @@ for i, fzg in enumerate(st.session_state.fahrzeuge):
     if rolle == "Werkstattmitarbeiter" and fortschritt != "Offen":
         anzeigen = False
     if anzeigen:
-        col1, col2, col3, col4 = st.columns([2, 3, 3, 2])
+        col1, col2, col3, col4 = st.columns([2, 2, 2, 2])
         with col1:
             st.markdown(f"**Fahrzeug {fzg['Fahrzeug']}**")
         with col2:
@@ -103,7 +148,7 @@ for i, fzg in enumerate(st.session_state.fahrzeuge):
                         else:
                             fzg["Status"] = "Karosserie zerlegt"
                     pd.DataFrame(st.session_state.fahrzeuge).to_csv(datafile, index=False)
-                   st.rerun()
+                    st.rerun()
         anzeige_fahrzeuge.append({**fzg, "Fortschritt": fortschritt})
 
 if anzeige_fahrzeuge:
@@ -114,9 +159,3 @@ if rolle == "Schichtleiter":
     if st.button("📤 Excel exportieren"):
         pd.DataFrame(st.session_state.fahrzeuge).to_excel("Demontage_Tagesplanung_WebApp.xlsx", index=False)
         st.success("Export abgeschlossen.")
-
-# App neuladen
-if st.button("🔄 App neu laden"):
-   st.rerun()
-
-
