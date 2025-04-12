@@ -71,7 +71,7 @@ if uploaded_file:
             st.session_state.fahrzeuge.append(neues_fahrzeug)
         pd.DataFrame(st.session_state.fahrzeuge).to_csv(datafile, index=False)
         st.success("Import abgeschlossen.")
-        st.experimental_rerun()
+       st.rerun()
 
 # Fahrzeuganzeige mit Rollenlogik
 st.header("🚗 Fahrzeugstatus bearbeiten")
@@ -103,7 +103,7 @@ for i, fzg in enumerate(st.session_state.fahrzeuge):
                         else:
                             fzg["Status"] = "Karosserie zerlegt"
                     pd.DataFrame(st.session_state.fahrzeuge).to_csv(datafile, index=False)
-                    st.experimental_rerun()
+                   st.rerun()
         anzeige_fahrzeuge.append({**fzg, "Fortschritt": fortschritt})
 
 if anzeige_fahrzeuge:
