@@ -1,14 +1,13 @@
 
 import streamlit as st
 import pandas as pd
+import cv2
+import numpy as np
 from datetime import datetime
 import os
 import plotly.express as px
 from streamlit_webrtc import webrtc_streamer, VideoProcessorBase, RTCConfiguration
 import av
-import cv2
-import numpy as np
-from pyzbar.pyzbar import decode
 
 st.set_page_config(layout="wide")
 
@@ -72,19 +71,21 @@ fig = px.bar(x=["Offen", "In Arbeit", "Abgeschlossen"],
 fig.update_layout(showlegend=False)
 st.plotly_chart(fig, use_container_width=True)
 
-# Kamera-QR-Scan
+# Kamera-QR-Scan mit OpenCV QRCodeDetector
 st.subheader("📷 Fahrzeug per QR-Code scannen")
 if "qr_result" not in st.session_state:
     st.session_state.qr_result = ""
 
 class QRProcessor(VideoProcessorBase):
+    def __init__(self):
+        self.detector = cv2.QRCodeDetector()
+
     def recv(self, frame):
         img = frame.to_ndarray(format="bgr24")
-        decoded_objs = decode(img)
-        for obj in decoded_objs:
-            st.session_state.qr_result = obj.data.decode("utf-8")
-            pts = np.array([obj.polygon], np.int32)
-            pts = pts.reshape((-1, 1, 2))
+        data, bbox, _ = self.detector.detectAndDecode(img)
+        if bbox is not None and data:
+            st.session_state.qr_result = data
+            pts = np.int32(bbox).reshape((-1, 1, 2))
             img = cv2.polylines(img, [pts], True, (0, 255, 0), 2)
         return av.VideoFrame.from_ndarray(img, format="bgr24")
 
@@ -159,3 +160,4 @@ if rolle == "Schichtleiter":
     if st.button("📤 Excel exportieren"):
         pd.DataFrame(st.session_state.fahrzeuge).to_excel("Demontage_Tagesplanung_WebApp.xlsx", index=False)
         st.success("Export abgeschlossen.")
+
