@@ -6,91 +6,84 @@ import os
 
 st.title("Demontageplanung – Automobil Kreislaufwirtschaft")
 
-# Initiale Daten
+# Stationen
 stationen = ['Flüssigkeiten ablassen', 'Batterie entfernen', 'Räder demontieren',
              'Innenraumteile ausbauen', 'Karosserie zerlegen']
-zeit_pro_schritt = timedelta(minutes=45)
 datafile = "fahrzeuge_daten.csv"
 
-# Lade bestehende Daten (falls vorhanden)
+# Session State laden
 if 'fahrzeuge' not in st.session_state:
     if os.path.exists(datafile):
         st.session_state.fahrzeuge = pd.read_csv(datafile).to_dict(orient="records")
     else:
         st.session_state.fahrzeuge = []
 
-# Uploadbereich für Excel-Dateien
-st.header("🚗 Excel-Upload für angelieferte Fahrzeuge")
-uploaded_file = st.file_uploader("Excel-Datei hochladen (.xlsx)", type=["xlsx"])
+# Fortschrittsstatus berechnen
+def berechne_status(status):
+    if status == 'Noch nicht begonnen':
+        return 'Offen'
+    elif status == 'Karosserie zerlegt':
+        return 'Abgeschlossen'
+    else:
+        return 'In Arbeit'
 
-if uploaded_file:
-    try:
-        df_upload = pd.read_excel(uploaded_file)
-        st.subheader("Vorschau hochgeladener Daten")
-        st.dataframe(df_upload)
+# Statistik
+fortschrittsliste = [berechne_status(fzg['Status']) for fzg in st.session_state.fahrzeuge]
+gesamt = len(fortschrittsliste)
+offen = fortschrittsliste.count('Offen')
+in_arbeit = fortschrittsliste.count('In Arbeit')
+abgeschlossen = fortschrittsliste.count('Abgeschlossen')
 
-        if st.button("In Tagesplanung übernehmen"):
-            for _, row in df_upload.iterrows():
-                try:
-                    neues_fahrzeug = {
-                        "Fahrzeug": int(row["Fahrzeugnummer"]),
-                        "Ankunftszeit": row["Ankunftszeit"],
-                        "Schicht": row["Schicht"],
-                        "Status": "Noch nicht begonnen",
-                        "Hinzugefügt am": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                    }
-                    st.session_state.fahrzeuge.append(neues_fahrzeug)
-                except Exception as e:
-                    st.warning(f"Fehler bei Zeile: {row} – {e}")
-            pd.DataFrame(st.session_state.fahrzeuge).to_csv(datafile, index=False)
-            st.success("Fahrzeuge aus Excel erfolgreich übernommen.")
-    except Exception as e:
-        st.error(f"Fehler beim Einlesen der Datei: {e}")
+st.subheader("📊 Übersicht")
+st.markdown(f"- Gesamt: **{gesamt}** Fahrzeuge")
+st.markdown(f"- 🕒 Offen: **{offen}**, 🔧 In Arbeit: **{in_arbeit}**, ✅ Abgeschlossen: **{abgeschlossen}**")
 
-# Fahrzeugformular (manuell)
-st.header("Fahrzeug manuell eingeben")
-fahrzeugnummer = st.number_input("Fahrzeugnummer", min_value=1, step=1)
-ankunft = st.time_input("Ankunftszeit", value=datetime.strptime("08:00", "%H:%M").time())
-schicht = st.selectbox("Schicht", ["Morgenschicht", "Spätschicht"])
+# Filteroption
+filter_option = st.selectbox("🔍 Filter", ["Alle", "Nur offene", "Nur in Arbeit", "Nur abgeschlossene"])
 
-if st.button("Fahrzeug hinzufügen"):
-    neues_fahrzeug = {
-        "Fahrzeug": fahrzeugnummer,
-        "Ankunftszeit": ankunft.strftime("%H:%M"),
-        "Schicht": schicht,
-        "Status": "Noch nicht begonnen",
-        "Hinzugefügt am": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    }
-    st.session_state.fahrzeuge.append(neues_fahrzeug)
-    pd.DataFrame(st.session_state.fahrzeuge).to_csv(datafile, index=False)
-    st.success(f"Fahrzeug {fahrzeugnummer} gespeichert.")
+# Fahrzeugtabelle mit Fortschritt und Bearbeitungsoption
+st.header("Fahrzeuge & Statusbearbeitung")
 
-# Fahrzeugstatus anzeigen und bearbeiten
-st.header("Fahrzeuge & Status")
-df_status = pd.DataFrame(st.session_state.fahrzeuge)
+anzeige_daten = []
+for i, fahrzeug in enumerate(st.session_state.fahrzeuge):
+    fortschritt = berechne_status(fahrzeug['Status'])
+    if (
+        filter_option == "Alle"
+        or (filter_option == "Nur offene" and fortschritt == "Offen")
+        or (filter_option == "Nur in Arbeit" and fortschritt == "In Arbeit")
+        or (filter_option == "Nur abgeschlossene" and fortschritt == "Abgeschlossen")
+    ):
+        col1, col2, col3 = st.columns([3, 4, 2])
+        with col1:
+            st.markdown(f"**Fahrzeug {fahrzeug['Fahrzeug']}**")
+        with col2:
+            st.markdown(f"Status: *{fahrzeug['Status']}* ({fortschritt})")
+        with col3:
+            if fortschritt != "Abgeschlossen":
+                if st.button(f"✅ Schritt abschließen", key=f"abschliessen_{i}"):
+                    aktueller_status = fahrzeug["Status"]
+                    if aktueller_status == "Noch nicht begonnen":
+                        st.session_state.fahrzeuge[i]["Status"] = stationen[0]
+                    elif aktueller_status in stationen:
+                        idx = stationen.index(aktueller_status)
+                        if idx + 1 < len(stationen):
+                            st.session_state.fahrzeuge[i]["Status"] = stationen[idx + 1]
+                        else:
+                            st.session_state.fahrzeuge[i]["Status"] = "Karosserie zerlegt"
+                    pd.DataFrame(st.session_state.fahrzeuge).to_csv(datafile, index=False)
+                    st.experimental_rerun()
+        anzeige_daten.append({
+            **fahrzeug,
+            "Fortschritt": fortschritt
+        })
 
-if not df_status.empty:
-    for i, row in df_status.iterrows():
-        status = st.selectbox(f"Status Fahrzeug {row['Fahrzeug']}",
-                              ['Noch nicht begonnen'] + stationen + ['Karosserie zerlegt'],
-                              index=(['Noch nicht begonnen'] + stationen + ['Karosserie zerlegt']).index(row['Status']) if 'Status' in row else 0,
-                              key=f"status_{i}")
-        st.session_state.fahrzeuge[i]["Status"] = status
+if anzeige_daten:
+    st.dataframe(pd.DataFrame(anzeige_daten))
 
-    st.dataframe(pd.DataFrame(st.session_state.fahrzeuge))
+# Neuladen
+if st.button("🔄 App neu laden"):
+    st.experimental_rerun()
 
-    if st.button("Exportieren als Excel"):
-        df_export = pd.DataFrame(st.session_state.fahrzeuge)
-        df_export.to_excel("Demontage_Tagesplanung_WebApp.xlsx", index=False)
-        st.success("Datei exportiert: Demontage_Tagesplanung_WebApp.xlsx")
-
-    if st.button("Daten zurücksetzen"):
-        st.session_state.fahrzeuge = []
-        if os.path.exists(datafile):
-            os.remove(datafile)
-        st.success("Alle Daten wurden zurückgesetzt.")
-else:
-    st.info("Noch keine Fahrzeuge eingetragen.")
 
 # Neuladen-Button
 if st.button("🔄 App neu laden"):
