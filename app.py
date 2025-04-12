@@ -1,90 +1,120 @@
 
 import streamlit as st
 import pandas as pd
-from datetime import datetime, timedelta
+from datetime import datetime
 import os
+import matplotlib.pyplot as plt
+
+st.set_page_config(layout="wide")
 
 st.title("Demontageplanung – Automobil Kreislaufwirtschaft")
 
-# Stationen
 stationen = ['Flüssigkeiten ablassen', 'Batterie entfernen', 'Räder demontieren',
              'Innenraumteile ausbauen', 'Karosserie zerlegen']
 datafile = "fahrzeuge_daten.csv"
 
-# Session State laden
+# Benutzerrolle
+rolle = st.sidebar.selectbox("🔐 Rolle wählen", ["Schichtleiter", "Werkstattmitarbeiter"])
+
+# Lade gespeicherte Daten
 if 'fahrzeuge' not in st.session_state:
     if os.path.exists(datafile):
         st.session_state.fahrzeuge = pd.read_csv(datafile).to_dict(orient="records")
     else:
         st.session_state.fahrzeuge = []
 
-# Fortschrittsstatus berechnen
-def berechne_status(status):
-    if status == 'Noch nicht begonnen':
-        return 'Offen'
-    elif status == 'Karosserie zerlegt':
-        return 'Abgeschlossen'
+def berechne_fortschritt(status):
+    if status == "Noch nicht begonnen":
+        return "Offen"
+    elif status == "Karosserie zerlegt":
+        return "Abgeschlossen"
     else:
-        return 'In Arbeit'
+        return "In Arbeit"
 
-# Statistik
-fortschrittsliste = [berechne_status(fzg['Status']) for fzg in st.session_state.fahrzeuge]
+# Sidebar-Statistik
+fortschrittsliste = [berechne_fortschritt(fzg["Status"]) for fzg in st.session_state.fahrzeuge]
 gesamt = len(fortschrittsliste)
-offen = fortschrittsliste.count('Offen')
-in_arbeit = fortschrittsliste.count('In Arbeit')
-abgeschlossen = fortschrittsliste.count('Abgeschlossen')
+offen = fortschrittsliste.count("Offen")
+in_arbeit = fortschrittsliste.count("In Arbeit")
+abgeschlossen = fortschrittsliste.count("Abgeschlossen")
 
-st.subheader("📊 Übersicht")
-st.markdown(f"- Gesamt: **{gesamt}** Fahrzeuge")
-st.markdown(f"- 🕒 Offen: **{offen}**, 🔧 In Arbeit: **{in_arbeit}**, ✅ Abgeschlossen: **{abgeschlossen}**")
+st.sidebar.markdown(f"**📊 Übersicht**")
+st.sidebar.markdown(f"- Gesamt: **{gesamt}**")
+st.sidebar.markdown(f"- 🕒 Offen: **{offen}**")
+st.sidebar.markdown(f"- 🔧 In Arbeit: **{in_arbeit}**")
+st.sidebar.markdown(f"- ✅ Abgeschlossen: **{abgeschlossen}**")
 
-# Filteroption
-filter_option = st.selectbox("🔍 Filter", ["Alle", "Nur offene", "Nur in Arbeit", "Nur abgeschlossene"])
+# Diagramm anzeigen
+with st.expander("📈 Fortschrittsdiagramm"):
+    fig, ax = plt.subplots()
+    ax.bar(["Offen", "In Arbeit", "Abgeschlossen"], [offen, in_arbeit, abgeschlossen])
+    ax.set_ylabel("Anzahl Fahrzeuge")
+    ax.set_title("Demontage-Fortschritt")
+    st.pyplot(fig)
 
-# Fahrzeugtabelle mit Fortschritt und Bearbeitungsoption
-st.header("Fahrzeuge & Statusbearbeitung")
+# Excel-Upload
+st.header("📥 Excel-Import für angelieferte Fahrzeuge")
+uploaded_file = st.file_uploader("Excel-Datei hochladen (.xlsx)", type=["xlsx"])
+if uploaded_file:
+    df_upload = pd.read_excel(uploaded_file)
+    st.dataframe(df_upload)
+    if st.button("In Planung übernehmen"):
+        for _, row in df_upload.iterrows():
+            neues_fahrzeug = {
+                "Fahrzeug": int(row["Fahrzeugnummer"]),
+                "Ankunftszeit": row["Ankunftszeit"],
+                "Schicht": row["Schicht"],
+                "Status": "Noch nicht begonnen",
+                "Begonnen": False,
+                "Hinzugefügt am": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            }
+            st.session_state.fahrzeuge.append(neues_fahrzeug)
+        pd.DataFrame(st.session_state.fahrzeuge).to_csv(datafile, index=False)
+        st.success("Import abgeschlossen.")
+        st.experimental_rerun()
 
-anzeige_daten = []
-for i, fahrzeug in enumerate(st.session_state.fahrzeuge):
-    fortschritt = berechne_status(fahrzeug['Status'])
-    if (
-        filter_option == "Alle"
-        or (filter_option == "Nur offene" and fortschritt == "Offen")
-        or (filter_option == "Nur in Arbeit" and fortschritt == "In Arbeit")
-        or (filter_option == "Nur abgeschlossene" and fortschritt == "Abgeschlossen")
-    ):
-        col1, col2, col3 = st.columns([3, 4, 2])
+# Fahrzeuganzeige mit Rollenlogik
+st.header("🚗 Fahrzeugstatus bearbeiten")
+
+anzeige_fahrzeuge = []
+for i, fzg in enumerate(st.session_state.fahrzeuge):
+    fortschritt = berechne_fortschritt(fzg["Status"])
+    anzeigen = True
+    if rolle == "Werkstattmitarbeiter" and fortschritt != "Offen":
+        anzeigen = False
+    if anzeigen:
+        col1, col2, col3, col4 = st.columns([2, 3, 3, 2])
         with col1:
-            st.markdown(f"**Fahrzeug {fahrzeug['Fahrzeug']}**")
+            st.markdown(f"**Fahrzeug {fzg['Fahrzeug']}**")
         with col2:
-            st.markdown(f"Status: *{fahrzeug['Status']}* ({fortschritt})")
+            st.markdown(f"Status: *{fzg['Status']}* ({fortschritt})")
         with col3:
+            fzg["Begonnen"] = st.checkbox("Begonnen?", value=fzg.get("Begonnen", False), key=f"beginn_{i}")
+        with col4:
             if fortschritt != "Abgeschlossen":
-                if st.button(f"✅ Schritt abschließen", key=f"abschliessen_{i}"):
-                    aktueller_status = fahrzeug["Status"]
-                    if aktueller_status == "Noch nicht begonnen":
-                        st.session_state.fahrzeuge[i]["Status"] = stationen[0]
-                    elif aktueller_status in stationen:
-                        idx = stationen.index(aktueller_status)
+                if st.button("✅ Abschließen", key=f"abschliessen_{i}"):
+                    status = fzg["Status"]
+                    if status == "Noch nicht begonnen":
+                        fzg["Status"] = stationen[0]
+                    elif status in stationen:
+                        idx = stationen.index(status)
                         if idx + 1 < len(stationen):
-                            st.session_state.fahrzeuge[i]["Status"] = stationen[idx + 1]
+                            fzg["Status"] = stationen[idx + 1]
                         else:
-                            st.session_state.fahrzeuge[i]["Status"] = "Karosserie zerlegt"
+                            fzg["Status"] = "Karosserie zerlegt"
                     pd.DataFrame(st.session_state.fahrzeuge).to_csv(datafile, index=False)
                     st.experimental_rerun()
-        anzeige_daten.append({
-            **fahrzeug,
-            "Fortschritt": fortschritt
-        })
+        anzeige_fahrzeuge.append({**fzg, "Fortschritt": fortschritt})
 
-if anzeige_daten:
-    st.dataframe(pd.DataFrame(anzeige_daten))
+if anzeige_fahrzeuge:
+    st.dataframe(pd.DataFrame(anzeige_fahrzeuge))
 
-# Neuladen
-if st.button("🔄 App neu laden"):
-    st.experimental_rerun()
+# Export
+if rolle == "Schichtleiter":
+    if st.button("📤 Excel exportieren"):
+        pd.DataFrame(st.session_state.fahrzeuge).to_excel("Demontage_Tagesplanung_WebApp.xlsx", index=False)
+        st.success("Export abgeschlossen.")
 
-
-# Neuladen-Button
+# App neuladen
 if st.button("🔄 App neu laden"):
     st.experimental_rerun()
