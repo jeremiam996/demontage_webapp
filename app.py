@@ -19,26 +19,53 @@ if 'fahrzeuge' not in st.session_state:
     else:
         st.session_state.fahrzeuge = []
 
-# Fahrzeugformular
+# Uploadbereich für Excel-Dateien
+st.header("🚗 Excel-Upload für angelieferte Fahrzeuge")
+uploaded_file = st.file_uploader("Excel-Datei hochladen (.xlsx)", type=["xlsx"])
+
+if uploaded_file:
+    try:
+        df_upload = pd.read_excel(uploaded_file)
+        st.subheader("Vorschau hochgeladener Daten")
+        st.dataframe(df_upload)
+
+        if st.button("In Tagesplanung übernehmen"):
+            for _, row in df_upload.iterrows():
+                try:
+                    neues_fahrzeug = {
+                        "Fahrzeug": int(row["Fahrzeugnummer"]),
+                        "Ankunftszeit": row["Ankunftszeit"],
+                        "Schicht": row["Schicht"],
+                        "Status": "Noch nicht begonnen",
+                        "Hinzugefügt am": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    }
+                    st.session_state.fahrzeuge.append(neues_fahrzeug)
+                except Exception as e:
+                    st.warning(f"Fehler bei Zeile: {row} – {e}")
+            pd.DataFrame(st.session_state.fahrzeuge).to_csv(datafile, index=False)
+            st.success("Fahrzeuge aus Excel erfolgreich übernommen.")
+    except Exception as e:
+        st.error(f"Fehler beim Einlesen der Datei: {e}")
+
+# Fahrzeugformular (manuell)
 st.header("Fahrzeug manuell eingeben")
 fahrzeugnummer = st.number_input("Fahrzeugnummer", min_value=1, step=1)
 ankunft = st.time_input("Ankunftszeit", value=datetime.strptime("08:00", "%H:%M").time())
 schicht = st.selectbox("Schicht", ["Morgenschicht", "Spätschicht"])
 
 if st.button("Fahrzeug hinzufügen"):
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     neues_fahrzeug = {
         "Fahrzeug": fahrzeugnummer,
         "Ankunftszeit": ankunft.strftime("%H:%M"),
         "Schicht": schicht,
         "Status": "Noch nicht begonnen",
-        "Hinzugefügt am": timestamp
+        "Hinzugefügt am": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     }
     st.session_state.fahrzeuge.append(neues_fahrzeug)
     pd.DataFrame(st.session_state.fahrzeuge).to_csv(datafile, index=False)
-    st.success(f"Fahrzeug {fahrzeugnummer} gespeichert um {timestamp}.")
+    st.success(f"Fahrzeug {fahrzeugnummer} gespeichert.")
 
-# Fahrzeuge anzeigen und Status bearbeiten
+# Fahrzeugstatus anzeigen und bearbeiten
 st.header("Fahrzeuge & Status")
 df_status = pd.DataFrame(st.session_state.fahrzeuge)
 
@@ -64,3 +91,7 @@ if not df_status.empty:
         st.success("Alle Daten wurden zurückgesetzt.")
 else:
     st.info("Noch keine Fahrzeuge eingetragen.")
+
+# Neuladen-Button
+if st.button("🔄 App neu laden"):
+    st.experimental_rerun()
