@@ -1,4 +1,8 @@
 streamlit
 pandas
 openpyxl
-matplotlib
+plotly
+streamlit-webrtc
+pyzbar
+opencv-python-headless
+numpy
