@@ -41,6 +41,10 @@ if not st.session_state.login:
     login()
     st.stop()
 
+if st.sidebar.button("🚪 Logout"):
+    st.session_state.clear()
+    st.experimental_rerun()
+
 rolle = st.session_state["nutzer"]["rolle"]
 
 # -----------------------------
@@ -112,6 +116,9 @@ elif seite == "Status":
             df.at[i, "Status"] = "abgeschlossen"
         df.at[i, "Bearbeitung gestartet"] = gestartet
 
+        if gestartet:
+            cols[4].markdown("✅ Schritte: Eingang ✅ - Prüfung ⬜ - Ausbau ⬜ - Abschluss ⬜")
+
     df.to_csv(DATEN_CSV, index=False)
 
 # -----------------------------
@@ -133,6 +140,13 @@ elif seite == "Parkkarte":
 elif seite == "Kalender":
     st.header("📆 Geplante Fahrzeuge")
     st.dataframe(kalender_df)
+
+    tag = st.date_input("Tag auswählen zur Anzeige")
+    if not kalender_df.empty:
+        geplante = kalender_df[kalender_df["Datum"] == tag.isoformat()]
+        st.subheader("Fahrzeuge an diesem Tag")
+        st.dataframe(geplante)
+
     with st.form("kalender_form"):
         fzg = st.text_input("Fahrzeug")
         datum = st.date_input("Geplant für")
@@ -157,7 +171,7 @@ elif seite == "Export":
         output = BytesIO()
         with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
             export_df.to_excel(writer, index=False, sheet_name="Fahrzeuge")
-        st.download_button("⬇️ Excel-Datei herunterladen", data=output.getvalue(), file_name="fahrzeuge_export.xlsx")
+        st.download_button("⬇️ Excel-Datei herunterladen", data=output.getvalue(), file_name="fahrzeuge_export.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
     else:
         st.info("Keine Daten zum Export verfügbar.")
 
