@@ -234,3 +234,31 @@ if seite == "Planung":
 
 
 
+
+
+
+# -----------------------------
+# Erweiterung: Fortschrittsanzeige
+# -----------------------------
+def berechne_fortschritt(zeile):
+    schritte = ["Öl ablassen", "Batterie entfernen", "Flüssigkeiten trennen", "Ausbau", "Abschluss"]
+    erledigt = sum([1 for s in schritte if zeile.get(s)])
+    return int((erledigt / len(schritte)) * 100)
+
+# -----------------------------
+# Erweiterung: Protokollierung
+# -----------------------------
+import csv
+from datetime import datetime
+
+def protokolliere_aenderung(fahrzeugnummer, feld, alt, neu, bearbeiter):
+    with open("historie.csv", "a", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow([datetime.now().isoformat(), fahrzeugnummer, feld, alt, neu, bearbeiter])
+
+# Diese Funktionen kannst du dann z.B. in der Status-Seite verwenden:
+# if alt != neu:
+#     protokolliere_aenderung(row["Fahrzeugnummer"], "Status", alt, neu, nutzername)
+
+
+
