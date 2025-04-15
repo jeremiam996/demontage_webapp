@@ -206,3 +206,30 @@ if seite == "Admin" and rolle == "admin":
             st.success("Benutzer gespeichert ✅")
 
 
+
+
+# ----------------------------------------
+# Erweiterung: Visuelle Erinnerung & Filter
+# ----------------------------------------
+
+if seite == "Planung":
+    ...
+
+    # Filteroptionen
+    schicht_filter = st.selectbox("Nach Schicht filtern", ["Alle"] + df["Schicht"].dropna().unique().tolist())
+    bearbeiter_filter = st.selectbox("Nach Bearbeiter filtern", ["Alle"] + df["Bearbeiter"].dropna().unique().tolist())
+
+    if schicht_filter != "Alle":
+        df = df[df["Schicht"] == schicht_filter]
+    if bearbeiter_filter != "Alle":
+        df = df[df["Bearbeiter"] == bearbeiter_filter]
+
+    st.markdown("### 🔔 Visuelle Erinnerung: Offene Fahrzeuge ohne Bearbeitung")
+    offene = df[(df["Status"] == "offen") & (df["Bearbeitung gestartet"] == False)]
+    if not offene.empty:
+        st.warning(f"⚠️ {len(offene)} Fahrzeuge sind noch nicht in Bearbeitung gestartet.")
+    else:
+        st.success("✅ Alle Fahrzeuge wurden bereits begonnen oder abgeschlossen.")
+
+
+
