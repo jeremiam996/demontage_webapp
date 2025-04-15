@@ -1,3 +1,2 @@
 nutzername,passwort,rolle,name,email
-admin,admin123,admin,Admin,admin@example.com
-max,max123,werkstatt,Max Mustermann,max@beispiel.de
+admin,admin,admin,Admin Nutzer,admin@example.com
