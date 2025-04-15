@@ -1,2 +1,5 @@
-Benutzer,Passwort,Rolle,Name,Email,Passwort_geändert
-admin,admin123,Admin,Admin,admin@example.com,True
+username,password,role,email
+admin,admin,admin,admin@example.com
+max,max123,schichtleiter,max@example.com
+lisa,lisa123,werkstattmitarbeiter,lisa@example.com
+
