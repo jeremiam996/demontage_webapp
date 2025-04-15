@@ -1,168 +1,184 @@
-# Vollständige, funktionierende App mit Login, QR-Code-Scan, Excel-Import, Status, Kalender, Parkplatzübersicht, PDF-Export
-
 import streamlit as st
 import pandas as pd
 import os
-import qrcode
-from datetime import datetime, date
-import plotly.express as px
-from fpdf import FPDF
-from streamlit_webrtc import webrtc_streamer, VideoTransformerBase
-import av
-import cv2
-from pyzbar.pyzbar import decode
-import tempfile
+import datetime
+from io import BytesIO
 
-# --- SETTINGS ---
-CSV_PATH = "fahrzeuge_daten.csv"
-USER_PATH = "user_db.csv"
-PARKPLATZ_PATH = "parkplaetze.csv"
-KALENDER_PATH = "kalender_daten.csv"
-PDF_PATH = "export_heute.pdf"
+# -----------------------------
+# Benutzerverwaltung
+# -----------------------------
+USER_DB = "benutzer.csv"
 
-st.set_page_config(page_title="Demontage App", layout="wide")
+def lade_benutzer():
+    if os.path.exists(USER_DB):
+        return pd.read_csv(USER_DB)
+    else:
+        return pd.DataFrame(columns=["nutzername", "passwort", "rolle", "name", "email"])
 
-# --- SESSION STATE INIT ---
-if "login" not in st.session_state:
-    st.session_state.login = None
-if "rolle" not in st.session_state:
-    st.session_state.rolle = None
-if "fahrzeuge" not in st.session_state:
-    st.session_state.fahrzeuge = pd.DataFrame()
+def speichere_benutzer(df):
+    df.to_csv(USER_DB, index=False)
 
-# --- LOAD DATA ---
-def load_csv(path, default_columns):
-    if not os.path.exists(path):
-        pd.DataFrame(columns=default_columns).to_csv(path, index=False)
-    return pd.read_csv(path)
-
-def save_csv(df, path):
-    df.to_csv(path, index=False)
-
-fahrzeuge = load_csv(CSV_PATH, ["Fahrzeug", "Ankunftszeit", "Schicht", "Status", "Begonnen", "Hinzugefügt am", "Parkplatz", "Geplant für", "Bearbeiter"])
-user_db = load_csv(USER_PATH, ["Benutzer", "Passwort", "Rolle", "Name", "Email", "Passwort_geändert"])
-kalender = load_csv(KALENDER_PATH, ["Fahrzeug", "Geplant für", "Schicht"])
-parkplaetze = load_csv(PARKPLATZ_PATH, ["Parkplatz", "Belegt"])
-
-# --- LOGIN ---
-if st.session_state.login is None:
-    st.subheader("🔐 Login")
-    with st.form("login_form"):
-        user = st.text_input("Benutzername")
-        pw = st.text_input("Passwort", type="password")
-        submit = st.form_submit_button("Anmelden")
-    if submit:
-        entry = user_db[(user_db.Benutzer == user) & (user_db.Passwort == pw)]
-        if not entry.empty:
-            st.session_state.login = user
-            st.session_state.rolle = entry.iloc[0].Rolle
-            st.rerun()
+def login():
+    st.sidebar.title("🔐 Login")
+    nutzername = st.sidebar.text_input("Benutzername")
+    passwort = st.sidebar.text_input("Passwort", type="password")
+    if st.sidebar.button("Login"):
+        df = lade_benutzer()
+        if nutzername in df["nutzername"].values:
+            row = df[df["nutzername"] == nutzername].iloc[0]
+            if row["passwort"] == passwort:
+                st.session_state["login"] = True
+                st.session_state["nutzer"] = row.to_dict()
+            else:
+                st.error("❌ Falsches Passwort")
         else:
-            st.error("Login fehlgeschlagen")
+            st.error("❌ Benutzername nicht gefunden")
+
+if "login" not in st.session_state:
+    st.session_state.login = False
+
+if not st.session_state.login:
+    login()
     st.stop()
 
-# --- HEADER ---
-st.markdown(f"### Willkommen, **{st.session_state.login}** ({st.session_state.rolle})")
-menu = st.sidebar.radio("Menü", ["Planung", "Status", "Parkplatz", "Kalender", "QR-Scan", "Export"])
+rolle = st.session_state["nutzer"]["rolle"]
 
-# --- PLANUNG ---
-if menu == "Planung":
-    st.subheader("📅 Fahrzeugplanung")
-    uploaded = st.file_uploader("Excel hochladen", type=["xlsx", "xls", "csv"])
-    if uploaded:
-        new_data = pd.read_csv(uploaded) if uploaded.name.endswith("csv") else pd.read_excel(uploaded)
-        new_data["Status"] = "Offen"
-        new_data["Begonnen"] = False
-        new_data["Hinzugefügt am"] = date.today().isoformat()
-        new_data["Parkplatz"] = ""
-        new_data["Bearbeiter"] = ""
+# -----------------------------
+# Daten laden
+# -----------------------------
+DATEN_CSV = "fahrzeuge.csv"
+PARKPLATZ_CSV = "parkplaetze.csv"
+KALENDER_CSV = "kalender.csv"
+
+if os.path.exists(DATEN_CSV):
+    df = pd.read_csv(DATEN_CSV)
+else:
+    df = pd.DataFrame(columns=["Fahrzeugnummer", "Status", "Bearbeitung gestartet", "Schicht", "Ankunft", "Parkplatz"])
+
+if os.path.exists(PARKPLATZ_CSV):
+    parkplaetze = pd.read_csv(PARKPLATZ_CSV)
+else:
+    parkplaetze = pd.DataFrame({"Platz": [f"{chr(r)}{n}" for r in range(65, 69) for n in range(1, 5)], "Belegt": [False]*16})
+
+if os.path.exists(KALENDER_CSV):
+    kalender_df = pd.read_csv(KALENDER_CSV)
+else:
+    kalender_df = pd.DataFrame(columns=["Fahrzeug", "Datum", "Schicht"])
+
+# -----------------------------
+# App Navigation
+# -----------------------------
+st.sidebar.title(f"Willkommen {st.session_state['nutzer']['name']}")
+seite = st.sidebar.radio("Navigation", ["Planung", "Status", "Parkkarte", "Kalender", "Export", "Admin"] if rolle == "admin" else ["Planung", "Status", "Kalender", "Export"])
+
+# -----------------------------
+# Seite: Planung
+# -----------------------------
+if seite == "Planung":
+    st.header("📅 Fahrzeugplanung")
+
+    uploaded_file = st.file_uploader("Excel-Datei mit Fahrzeugen hochladen", type=["xlsx"])
+    if uploaded_file:
+        neue_df = pd.read_excel(uploaded_file)
+        neue_df["Status"] = "offen"
+        neue_df["Bearbeitung gestartet"] = False
         freie = parkplaetze[parkplaetze.Belegt == False]
-        for i in range(len(new_data)):
+        for i, row in neue_df.iterrows():
             if i < len(freie):
-                platz = freie.iloc[i].Parkplatz
-                new_data.at[i, "Parkplatz"] = platz
-                parkplaetze.loc[parkplaetze.Parkplatz == platz, "Belegt"] = True
-        fahrzeuge = pd.concat([fahrzeuge, new_data], ignore_index=True)
-        save_csv(fahrzeuge, CSV_PATH)
-        save_csv(parkplaetze, PARKPLATZ_PATH)
-        st.success("Import erfolgreich")
-    st.dataframe(fahrzeuge)
+                neue_df.at[i, "Parkplatz"] = freie.iloc[i]["Platz"]
+                parkplaetze.loc[parkplaetze.Platz == freie.iloc[i]["Platz"], "Belegt"] = True
+        df = pd.concat([df, neue_df], ignore_index=True)
+        df.to_csv(DATEN_CSV, index=False)
+        parkplaetze.to_csv(PARKPLATZ_CSV, index=False)
+        st.success("Import erfolgreich und Fahrzeuge eingeplant ✅")
 
-# --- STATUS ---
-elif menu == "Status":
-    st.subheader("📊 Statusübersicht")
-    rolle = st.session_state.rolle
-    if rolle == "Werkstattmitarbeiter":
-        df = fahrzeuge[fahrzeuge.Status != "Abgeschlossen"]
-    else:
-        df = fahrzeuge
+    st.dataframe(df)
+
+# -----------------------------
+# Seite: Status
+# -----------------------------
+elif seite == "Status":
+    st.header("🛠️ Fahrzeugstatus")
+
+    if rolle != "admin":
+        df = df[df["Status"] != "abgeschlossen"]
+
     for i, row in df.iterrows():
-        col1, col2, col3 = st.columns([3, 2, 2])
-        with col1:
-            st.write(row.Fahrzeug)
-        with col2:
-            if st.checkbox("Begonnen", key=f"begonnen_{i}", value=row.Begonnen):
-                fahrzeuge.at[i, "Begonnen"] = True
-        with col3:
-            if st.button("Abgeschlossen", key=f"fertig_{i}"):
-                fahrzeuge.at[i, "Status"] = "Abgeschlossen"
-                fahrzeuge.at[i, "Bearbeiter"] = st.session_state.login
-    fig = px.histogram(fahrzeuge, x="Status")
-    st.plotly_chart(fig, use_container_width=True)
-    save_csv(fahrzeuge, CSV_PATH)
+        cols = st.columns([3, 2, 2, 2, 2])
+        cols[0].markdown(f"**{row['Fahrzeugnummer']}**")
+        cols[1].markdown(f"Status: {row['Status']}")
+        gestartet = cols[2].checkbox("Gestartet", value=row["Bearbeitung gestartet"], key=f"start_{i}")
+        if cols[3].button("Abschließen", key=f"done_{i}"):
+            df.at[i, "Status"] = "abgeschlossen"
+        df.at[i, "Bearbeitung gestartet"] = gestartet
 
-# --- PARKPLATZ ---
-elif menu == "Parkplatz":
-    st.subheader("🅿️ Parkplatzbelegung")
-    grid_cols = ["A", "B", "C", "D"]
-    grid_rows = range(1, 5)
-    belegung = {(row["Parkplatz"]): row["Belegt"] for _, row in parkplaetze.iterrows()}
-    for col in grid_cols:
-        columns = st.columns(len(grid_rows))
-        for i, r in enumerate(grid_rows):
-            platz = f"{col}{r}"
-            farbe = "red" if belegung.get(platz, False) else "green"
-            columns[i].markdown(f"<div style='background:{farbe};padding:15px;border-radius:5px;text-align:center;color:white'>{platz}</div>", unsafe_allow_html=True)
+    df.to_csv(DATEN_CSV, index=False)
 
-# --- KALENDER ---
-elif menu == "Kalender":
-    st.subheader("📅 Kalender – künftige Anlieferungen")
-    st.dataframe(kalender)
+# -----------------------------
+# Seite: Parkkarte
+# -----------------------------
+elif seite == "Parkkarte":
+    st.header("🅿️ Parkplatzübersicht")
+    for i in range(4):
+        cols = st.columns(4)
+        for j in range(4):
+            platz = f"{chr(65+i)}{j+1}"
+            belegt = parkplaetze[parkplaetze.Platz == platz]["Belegt"].values[0]
+            farbe = "red" if belegt else "green"
+            cols[j].markdown(f"<div style='background-color:{farbe};color:white;padding:10px;text-align:center;border-radius:10px'>{platz}</div>", unsafe_allow_html=True)
+
+# -----------------------------
+# Seite: Kalender
+# -----------------------------
+elif seite == "Kalender":
+    st.header("📆 Geplante Fahrzeuge")
+    st.dataframe(kalender_df)
     with st.form("kalender_form"):
         fzg = st.text_input("Fahrzeug")
         datum = st.date_input("Geplant für")
         schicht = st.selectbox("Schicht", ["Morgenschicht", "Spätschicht"])
-        if st.form_submit_button("Hinzufügen"):
-            kalender.loc[len(kalender)] = [fzg, datum.isoformat(), schicht]
-            save_csv(kalender, KALENDER_PATH)
-            st.success("Eingetragen")
+        speichern = st.form_submit_button("Eintragen")
+        if speichern:
+            kalender_df = pd.concat([kalender_df, pd.DataFrame([[fzg, datum.isoformat(), schicht]], columns=kalender_df.columns)])
+            kalender_df.to_csv(KALENDER_CSV, index=False)
+            st.success("Eingetragen ✅")
 
-# --- QR-SCAN ---
-elif menu == "QR-Scan":
-    st.subheader("📷 Fahrzeug per QR-Code hinzufügen")
+# -----------------------------
+# Seite: Export
+# -----------------------------
+elif seite == "Export":
+    st.header("📤 Export")
+    nur_heute = st.checkbox("Nur heutige Fahrzeuge exportieren")
+    export_df = df.copy()
+    if nur_heute:
+        export_df = export_df[export_df["Ankunft"] == datetime.date.today().isoformat()]
 
-    class QRScanner(VideoTransformerBase):
-        def transform(self, frame):
-            img = frame.to_ndarray(format="bgr24")
-            for code in decode(img):
-                data = code.data.decode("utf-8")
-                st.session_state.qr_code_data = data
-            return img
+    if not export_df.empty:
+        output = BytesIO()
+        with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
+            export_df.to_excel(writer, index=False, sheet_name="Fahrzeuge")
+        st.download_button("⬇️ Excel-Datei herunterladen", data=output.getvalue(), file_name="fahrzeuge_export.xlsx")
+    else:
+        st.info("Keine Daten zum Export verfügbar.")
 
-    webrtc_streamer(key="qr", video_transformer_factory=QRScanner)
-    if "qr_code_data" in st.session_state:
-        st.success(f"QR-Code erkannt: {st.session_state.qr_code_data}")
-        new_row = pd.DataFrame([[st.session_state.qr_code_data, datetime.now().strftime("%H:%M"), "", "Offen", False, date.today().isoformat(), "", "", ""]], columns=fahrzeuge.columns)
-        fahrzeuge = pd.concat([fahrzeuge, new_row], ignore_index=True)
-        save_csv(fahrzeuge, CSV_PATH)
-        del st.session_state.qr_code_data
+# -----------------------------
+# Seite: Admin
+# -----------------------------
+if seite == "Admin" and rolle == "admin":
+    st.header("👥 Benutzerverwaltung")
+    benutzer_df = lade_benutzer()
+    with st.form("Neuen Benutzer anlegen"):
+        name = st.text_input("Name")
+        mail = st.text_input("E-Mail")
+        nutzername = st.text_input("Nutzername")
+        passwort = st.text_input("Standardpasswort")
+        rolle = st.selectbox("Rolle", ["admin", "werkstatt"])
+        senden = st.form_submit_button("Benutzer speichern")
+        if senden:
+            benutzer_df = pd.concat([benutzer_df, pd.DataFrame([[nutzername, passwort, rolle, name, mail]], columns=benutzer_df.columns)])
+            speichere_benutzer(benutzer_df)
+            st.success("Benutzer gespeichert ✅")
 
-# --- EXPORT ---
-elif menu == "Export":
-    st.subheader("📤 Export Funktionen")
-    if st.checkbox("Nur Fahrzeuge von heute exportieren"):
-        today = date.today().isoformat()
-        export_df = fahrzeuge[fahrzeuge["Hinzugefügt am"] == today]
     else:
         export_df = fahrzeuge
     st.download_button("⬇️ CSV Export", export_df.to_csv(index=False), file_name="fahrzeuge_export.csv")
