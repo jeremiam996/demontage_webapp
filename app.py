@@ -130,7 +130,9 @@ elif seite == "Parkkarte":
         cols = st.columns(4)
         for j in range(4):
             platz = f"{chr(65+i)}{j+1}"
-            belegt = parkplaetze[parkplaetze.Platz == platz]["Belegt"].values[0]
+            belegt = False
+            if not parkplaetze[parkplaetze.Platz == platz].empty:
+                belegt = parkplaetze[parkplaetze.Platz == platz]["Belegt"].iloc[0]
             farbe = "red" if belegt else "green"
             cols[j].markdown(f"<div style='background-color:{farbe};color:white;padding:10px;text-align:center;border-radius:10px'>{platz}</div>", unsafe_allow_html=True)
 
