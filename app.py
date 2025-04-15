@@ -156,7 +156,8 @@ elif seite == "Kalender":
             kalender_df = pd.concat([kalender_df, pd.DataFrame([[fzg, datum.isoformat(), schicht]], columns=kalender_df.columns)])
             kalender_df.to_csv(KALENDER_CSV, index=False)
             st.success("Eingetragen ✅")
-                if rolle in ["admin", "schichtleiter"] and not kalender_df.empty:
+
+    if rolle in ["admin", "schichtleiter"] and not kalender_df.empty:
         st.subheader("🚚 Eintrag verschieben")
         auszuwahl = kalender_df["Fahrzeug"].unique().tolist()
         zu_verschieben = st.selectbox("Fahrzeug auswählen", auszuwahl)
