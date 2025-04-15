@@ -156,6 +156,17 @@ elif seite == "Kalender":
             kalender_df = pd.concat([kalender_df, pd.DataFrame([[fzg, datum.isoformat(), schicht]], columns=kalender_df.columns)])
             kalender_df.to_csv(KALENDER_CSV, index=False)
             st.success("Eingetragen ✅")
+                if rolle in ["admin", "schichtleiter"] and not kalender_df.empty:
+        st.subheader("🚚 Eintrag verschieben")
+        auszuwahl = kalender_df["Fahrzeug"].unique().tolist()
+        zu_verschieben = st.selectbox("Fahrzeug auswählen", auszuwahl)
+        neues_datum = st.date_input("Neues Datum")
+        neue_schicht = st.selectbox("Neue Schicht", ["Morgenschicht", "Spätschicht"])
+        if st.button("Verschieben"):
+            kalender_df.loc[kalender_df["Fahrzeug"] == zu_verschieben, ["Datum", "Schicht"]] = [neues_datum.isoformat(), neue_schicht]
+            kalender_df.to_csv(KALENDER_CSV, index=False)
+            st.success("Eintrag aktualisiert ✅")
+
 
 # -----------------------------
 # Seite: Export
