@@ -179,7 +179,4 @@ if seite == "Admin" and rolle == "admin":
             speichere_benutzer(benutzer_df)
             st.success("Benutzer gespeichert ✅")
 
-    else:
-        export_df = fahrzeuge
-    st.download_button("⬇️ CSV Export", export_df.to_csv(index=False), file_name="fahrzeuge_export.csv")
 
