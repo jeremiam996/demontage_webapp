@@ -1,9 +1,5 @@
 streamlit
 pandas
-openpyxl
 plotly
-opencv-python-headless
-numpy
-streamlit-webrtc
 fpdf
 qrcode
