@@ -1,7 +1,6 @@
 streamlit
 pandas
-plotly
-fpdf
 qrcode
 opencv-python-headless
-streamlit-webrtc
+Pillow
+pyzbar
