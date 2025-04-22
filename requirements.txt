@@ -1,5 +1,7 @@
 streamlit
 pandas
+fpdf
+qrcode
 plotly
 openpyxl
 xlsxwriter
