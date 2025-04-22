@@ -1,1 +1,3 @@
-Fahrzeugnummer,Status,Bearbeitung gestartet,Schicht,Ankunft,Parkplatz,Bearbeiter,Öl ablassen,Batterie entfernen,Flüssigkeiten trennen,Ausbau,Abschluss
+Fahrzeugnummer,Status,Bearbeitung gestartet,Schicht,Ankunft,Parkplatz
+12345,offen,False,Tagesschicht,2025-04-22,A1
+67890,in Bearbeitung,True,Nachtschicht,2025-04-21,B2

@@ -1,2 +1,2 @@
-nutzername,passwort,rolle,name,email
-admin,admin,admin,Admin Nutzer,admin@example.com
+nutzername,passwort_hash,rolle,name,email
+admin,$2b$12$w3N3Z9p3f3YQf2eY1b3Jie0NfY8T8n8xqKNppQG4RjXed2F8NJo5O,admin,Admin Nutzer,admin@example.com
