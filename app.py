@@ -66,12 +66,16 @@ if not st.session_state.login:
     passwort = st.sidebar.text_input("Passwort", type="password")
     if st.sidebar.button("Login"):
         df_benutzer = lade_benutzer()
-        if benutzername in df_benutzer.nutzername.values:
-            user_row = df_benutzer[df_benutzer.nutzername == benutzername].iloc[0]
-            if user_row.passwort == passwort:
+        if benutzername in df_benutzer["nutzername"].values:
+            user_row = df_benutzer[df_benutzer["nutzername"] == benutzername]
+            if not user_row.empty and user_row.iloc[0]["passwort"] == passwort:
                 st.session_state.login = True
-                st.session_state.nutzer = user_row.to_dict()
+                st.session_state.nutzer = user_row.iloc[0].to_dict()
                 st.experimental_rerun()
+            else:
+                st.error("❌ Falsches Passwort")
+        else:
+            st.error("❌ Nutzer nicht gefunden")
             else:
                 st.error("❌ Falsches Passwort")
         else:
@@ -211,4 +215,5 @@ elif seite == "Benutzerverwaltung" and st.session_state["nutzer"]["rolle"] == "a
             benutzer_df = benutzer_df[benutzer_df.nutzername != auswahl]
             benutzer_df.to_csv(USER_DB, index=False)
             st.success("Benutzer gelöscht")
+
 
