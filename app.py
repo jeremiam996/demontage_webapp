@@ -167,6 +167,49 @@ if up:
     except Exception as e:
         st.error(f"Fehler: {e}")
 
+# [NEUER BLOCK: Subtask Checkbox-Dashboard + Erinnerungserkennung + Rolle Schichtleiter]
+# 🧩 Subtask Fortschrittsübersicht mit Checkboxen + Erinnerungen für Schichtleiter
+if st.session_state["nutzer"]["rolle"] in ["schichtleiter", "admin"]:
+    st.subheader("📋 Subtask Übersicht (Schichtleiter)")
+    all_tasks = lade_subtasks()
+    all_tasks = all_tasks.merge(df[["Fahrzeugnummer", "Bearbeiter"]], on="Fahrzeugnummer", how="left")
+    gruppiert = all_tasks.groupby("Fahrzeugnummer")
+    for fz, group in gruppiert:
+        st.markdown(f"**🚗 Fahrzeug {fz}**")
+        for i, row in group.iterrows():
+            col1, col2, col3 = st.columns([6, 2, 2])
+            with col1:
+                done = row["Status"] == "erledigt"
+                neu_status = st.checkbox(row["Aufgabe"], value=done, key=f"check_{fz}_{i}")
+                if neu_status != done:
+                    all_tasks.at[i, "Status"] = "erledigt" if neu_status else "offen"
+            with col2:
+                st.markdown(f"🧑 {row['Bearbeiter'] if pd.notna(row['Bearbeiter']) else '-'}")
+            with col3:
+                farbe = "🔴" if row["Prioritaet"] == "hoch" and row["Status"] == "offen" else "🟢"
+                st.markdown(f"{farbe} {row['Prioritaet']}")
+    if st.button("📌 Änderungen speichern (Schichtleiter)"):
+        speichere_subtasks(all_tasks)
+        st.success("Aufgaben aktualisiert")
+
+    # 📊 Fortschrittsauswertung pro Bearbeiter
+    st.subheader("📈 Aufgabenstatus je Bearbeiter")
+    stats = all_tasks.groupby(["Bearbeiter", "Status"]).size().unstack(fill_value=0)
+    st.bar_chart(stats)
+
+    # 📆 Aufgabenfilter nach Datum
+    st.subheader("📅 Aufgabenfilter")
+    heute = pd.to_datetime("today").normalize()
+    deadline_map = {
+        "Heute": heute,
+        "Morgen": heute + pd.Timedelta(days=1),
+        "Diese Woche": heute + pd.Timedelta(days=7)
+    }
+    for label, grenze in deadline_map.items():
+        st.markdown(f"### {label}")
+        heute_tasks = all_tasks[(all_tasks["Status"] != "erledigt") & (all_tasks["Prioritaet"] == "hoch") & (all_tasks["Fahrzeugnummer"].isin(df[df["Status"] != "Fertig"]["Fahrzeugnummer"]))]
+        for _, row in heute_tasks.iterrows():
+            st.markdown(f"- 🚗 **{row['Fahrzeugnummer']}** – {row['Aufgabe']} [{row['Status']}] ({row['Prioritaet']})")
 
 
 
