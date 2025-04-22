@@ -211,7 +211,29 @@ if st.session_state["nutzer"]["rolle"] in ["schichtleiter", "admin"]:
         for _, row in heute_tasks.iterrows():
             st.markdown(f"- 🚗 **{row['Fahrzeugnummer']}** – {row['Aufgabe']} [{row['Status']}] ({row['Prioritaet']})")
 
-# Seitenleiste für Navigation, Logout & Benutzerverwaltung
+# LOGIN & SESSIONSETUP
+if "login" not in st.session_state:
+    st.session_state.login = False
+
+if not st.session_state.login:
+    st.sidebar.title("🔐 Login")
+    benutzername = st.sidebar.text_input("Benutzername")
+    passwort = st.sidebar.text_input("Passwort", type="password")
+    if st.sidebar.button("Login"):
+        df_benutzer = lade_benutzer()
+        if benutzername in df_benutzer.nutzername.values:
+            user_row = df_benutzer[df_benutzer.nutzername == benutzername].iloc[0]
+            if user_row.passwort == passwort:
+                st.session_state.login = True
+                st.session_state.nutzer = user_row.to_dict()
+                st.experimental_rerun()
+            else:
+                st.error("❌ Falsches Passwort")
+        else:
+            st.error("❌ Nutzer nicht gefunden")
+    st.stop()
+
+# SEITENLEISTE mit Navigation + Logout
 st.sidebar.title("🚗 Navigation")
 seiten = ["Fahrzeugbearbeitung", "Subtasks", "Kalender", "Parkkarte", "Import", "QR-Codes", "Export"]
 if st.session_state["nutzer"]["rolle"] == "admin":
@@ -222,7 +244,7 @@ if st.sidebar.button("🔒 Logout"):
     st.session_state.login = False
     st.experimental_rerun()
 
-# Benutzerverwaltung Sidebar Panel (nur admin sichtbar)
+# BENUTZERVERWALTUNG (nur admin sichtbar)
 if seite == "Benutzerverwaltung" and st.session_state["nutzer"]["rolle"] == "admin":
     st.subheader("👥 Benutzerverwaltung")
     benutzer_df = lade_benutzer()
@@ -247,4 +269,3 @@ if seite == "Benutzerverwaltung" and st.session_state["nutzer"]["rolle"] == "adm
             benutzer_df = benutzer_df[benutzer_df.nutzername != auswahl]
             benutzer_df.to_csv(USER_DB, index=False)
             st.success("Benutzer gelöscht")
-
