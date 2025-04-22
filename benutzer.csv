@@ -1,2 +1,2 @@
 nutzername,passwort_hash,rolle,name,email
-admin,$2b$12$w3N3Z9p3f3YQf2eY1b3Jie0NfY8T8n8xqKNppQG4RjXed2F8NJo5O,admin,Admin Nutzer,admin@example.com
+admin,$pbkdf2-sha256$29000$1O5VY0Xj2Z5x5bZfYVtZUg$5r9RO1DFz8B3th2u3tQ5EtrVw0QXui3R8cXcnlDxxVY,admin,Admin Nutzer,admin@example.com
