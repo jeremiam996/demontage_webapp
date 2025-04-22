@@ -211,5 +211,40 @@ if st.session_state["nutzer"]["rolle"] in ["schichtleiter", "admin"]:
         for _, row in heute_tasks.iterrows():
             st.markdown(f"- 🚗 **{row['Fahrzeugnummer']}** – {row['Aufgabe']} [{row['Status']}] ({row['Prioritaet']})")
 
+# Seitenleiste für Navigation, Logout & Benutzerverwaltung
+st.sidebar.title("🚗 Navigation")
+seiten = ["Fahrzeugbearbeitung", "Subtasks", "Kalender", "Parkkarte", "Import", "QR-Codes", "Export"]
+if st.session_state["nutzer"]["rolle"] == "admin":
+    seiten.append("Benutzerverwaltung")
+seite = st.sidebar.radio("Seite auswählen", seiten)
 
+if st.sidebar.button("🔒 Logout"):
+    st.session_state.login = False
+    st.experimental_rerun()
+
+# Benutzerverwaltung Sidebar Panel (nur admin sichtbar)
+if seite == "Benutzerverwaltung" and st.session_state["nutzer"]["rolle"] == "admin":
+    st.subheader("👥 Benutzerverwaltung")
+    benutzer_df = lade_benutzer()
+    with st.expander("➕ Benutzer hinzufügen"):
+        name = st.text_input("Name")
+        user = st.text_input("Benutzername")
+        pw = st.text_input("Passwort")
+        mail = st.text_input("E-Mail")
+        rolle = st.selectbox("Rolle", ["admin", "schichtleiter", "mitarbeiter"])
+        if st.button("Benutzer speichern"):
+            if user in benutzer_df.nutzername.values:
+                st.warning("Benutzername existiert bereits")
+            else:
+                neu = pd.DataFrame([[user, pw, rolle, name, mail]], columns=benutzer_df.columns)
+                benutzer_df = pd.concat([benutzer_df, neu], ignore_index=True)
+                benutzer_df.to_csv(USER_DB, index=False)
+                st.success("Benutzer hinzugefügt")
+
+    with st.expander("❌ Benutzer löschen"):
+        auswahl = st.selectbox("Benutzer wählen", benutzer_df.nutzername.tolist())
+        if st.button("🗑️ Löschen"):
+            benutzer_df = benutzer_df[benutzer_df.nutzername != auswahl]
+            benutzer_df.to_csv(USER_DB, index=False)
+            st.success("Benutzer gelöscht")
 
