@@ -86,6 +86,7 @@ st.sidebar.title("🚗 Navigation")
 seiten = ["Fahrzeugbearbeitung", "Subtasks", "Kalender", "Parkkarte", "Import", "QR-Codes", "Export"]
 if st.session_state["nutzer"]["rolle"] == "admin":
     seiten.append("Benutzerverwaltung")
+seite = st.sidebar.markdown(f"👋 Willkommen, **{st.session_state['nutzer']['name']}**")
 seite = st.sidebar.radio("Seite auswählen", seiten)
 
 if st.sidebar.button("🔒 Logout"):
@@ -215,5 +216,6 @@ elif seite == "Benutzerverwaltung" and st.session_state["nutzer"]["rolle"] == "a
             benutzer_df = benutzer_df[benutzer_df.nutzername != auswahl]
             benutzer_df.to_csv(USER_DB, index=False)
             st.success("Benutzer gelöscht")
+
 
 
