@@ -1,4 +1,4 @@
-# Erweiterte app.py mit Priorisierung, Fortschrittsanzeige, Historie, farbigem Monatskalender, PDF-Export und E-Mail-Benachrichtigung
+# Erweiterte app.py mit QR-Codes, Historie-Export, Mitarbeiterzuweisung, Status, Fortschritt, Kalender, PDF
 import streamlit as st
 import pandas as pd
 import os
@@ -7,11 +7,66 @@ from email.message import EmailMessage
 import datetime
 import calendar
 from fpdf import FPDF
+import qrcode
+from io import BytesIO
 
 USER_DB = "benutzer.csv"
 DATEN_CSV = "fahrzeuge.csv"
 HISTORIE_CSV = "historie.csv"
 KALENDER_CSV = "kalender.csv"
+
+@st.cache_data
+def lade_benutzer():
+    if os.path.exists(USER_DB):
+        return pd.read_csv(USER_DB)
+    return pd.DataFrame(columns=["nutzername", "passwort", "rolle", "name", "email"])
+
+def sende_mail(empfaenger_liste, text):
+    if not empfaenger_liste:
+        return
+    msg = EmailMessage()
+    msg.set_content(text)
+    msg["Subject"] = "Fahrzeugstatus aktualisiert"
+    msg["From"] = "noreply@demontage.local"
+    msg["To"] = ", ".join(empfaenger_liste)
+    try:
+        with smtplib.SMTP("localhost") as server:
+            server.send_message(msg)
+    except Exception as e:
+        st.warning(f"Fehler beim Senden der E-Mail: {e}")
+
+def generiere_qr(text):
+    img = qrcode.make(text)
+    buf = BytesIO()
+    img.save(buf, format="PNG")
+    return buf.getvalue()
+
+def export_historie_pdf():
+    df = pd.read_csv(HISTORIE_CSV)
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_font("Arial", size=11)
+    pdf.cell(200, 10, "Änderungshistorie", ln=True, align="C")
+    pdf.ln(5)
+    for _, row in df.iterrows():
+        text = f"{row['Datum']} — {row['Fahrzeugnummer']} — {row['Änderung']} durch {row['Bearbeiter']}"
+        pdf.multi_cell(0, 8, txt=text)
+    path = "historie_export.pdf"
+    pdf.output(path)
+    with open(path, "rb") as f:
+        st.download_button("⬇️ Historie als PDF", f, file_name=path)
+
+st.sidebar.title("🔧 Export & QR")
+if st.sidebar.button("Export Historie als PDF"):
+    export_historie_pdf()
+
+if st.sidebar.checkbox("Fahrzeug-QR-Codes anzeigen"):
+    if os.path.exists(DATEN_CSV):
+        df_qr = pd.read_csv(DATEN_CSV)
+        for _, row in df_qr.iterrows():
+            st.markdown(f"**{row['Fahrzeugnummer']}**")
+            img_bytes = generiere_qr(row['Fahrzeugnummer'])
+            st.image(img_bytes, width=150)
 
 @st.cache_data
 def lade_benutzer():
