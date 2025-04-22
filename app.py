@@ -77,8 +77,6 @@ if not st.session_state.login:
         else:
             st.error("❌ Nutzer nicht gefunden")
 
-        else:
-            st.error("❌ Nutzer nicht gefunden")
     st.stop()
 
 st.sidebar.title("🚗 Navigation")
