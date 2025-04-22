@@ -76,8 +76,7 @@ if not st.session_state.login:
                 st.error("❌ Falsches Passwort")
         else:
             st.error("❌ Nutzer nicht gefunden")
-            else:
-                st.error("❌ Falsches Passwort")
+
         else:
             st.error("❌ Nutzer nicht gefunden")
     st.stop()
