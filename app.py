@@ -1,284 +1,168 @@
+# Erweiterte app.py mit Priorisierung, Fortschrittsanzeige, Historie, farbigem Monatskalender, PDF-Export und E-Mail-Benachrichtigung
 import streamlit as st
 import pandas as pd
 import os
+import smtplib
+from email.message import EmailMessage
 import datetime
-from io import BytesIO
+import calendar
+from fpdf import FPDF
 
-# -----------------------------
-# Benutzerverwaltung
-# -----------------------------
 USER_DB = "benutzer.csv"
+DATEN_CSV = "fahrzeuge.csv"
+HISTORIE_CSV = "historie.csv"
+KALENDER_CSV = "kalender.csv"
 
+@st.cache_data
 def lade_benutzer():
     if os.path.exists(USER_DB):
         return pd.read_csv(USER_DB)
-    else:
-        return pd.DataFrame(columns=["nutzername", "passwort", "rolle", "name", "email"])
-
-def speichere_benutzer(df):
-    df.to_csv(USER_DB, index=False)
+    return pd.DataFrame(columns=["nutzername", "passwort", "rolle", "name", "email"])
 
 def login():
     st.sidebar.title("🔐 Login")
-    nutzername = st.sidebar.text_input("Benutzername")
-    passwort = st.sidebar.text_input("Passwort", type="password")
+    name = st.sidebar.text_input("Benutzername")
+    pw = st.sidebar.text_input("Passwort", type="password")
     if st.sidebar.button("Login"):
         df = lade_benutzer()
-        if nutzername in df["nutzername"].values:
-            row = df[df["nutzername"] == nutzername].iloc[0]
-            if row["passwort"] == passwort:
+        if name in df.nutzername.values:
+            row = df[df.nutzername == name].iloc[0]
+            if row.passwort == pw:
                 st.session_state["login"] = True
                 st.session_state["nutzer"] = row.to_dict()
             else:
                 st.error("❌ Falsches Passwort")
         else:
-            st.error("❌ Benutzername nicht gefunden")
+            st.error("❌ Nutzer nicht gefunden")
 
 if "login" not in st.session_state:
     st.session_state.login = False
-
 if not st.session_state.login:
     login()
     st.stop()
 
-if st.sidebar.button("🚪 Logout"):
-    st.session_state.clear()
-    st.experimental_rerun()
-
-rolle = st.session_state["nutzer"]["rolle"]
-
-# -----------------------------
-# Daten laden
-# -----------------------------
-DATEN_CSV = "fahrzeuge.csv"
-PARKPLATZ_CSV = "parkplaetze.csv"
-KALENDER_CSV = "kalender.csv"
-
 if os.path.exists(DATEN_CSV):
     df = pd.read_csv(DATEN_CSV)
 else:
-    df = pd.DataFrame(columns=["Fahrzeugnummer", "Status", "Bearbeitung gestartet", "Schicht", "Ankunft", "Parkplatz"])
+    df = pd.DataFrame(columns=["Fahrzeugnummer", "Status", "Bearbeitung gestartet", "Prioritaet", "Fortschritt"])
 
-if os.path.exists(PARKPLATZ_CSV):
-    parkplaetze = pd.read_csv(PARKPLATZ_CSV)
-else:
-    parkplaetze = pd.DataFrame({"Platz": [f"{chr(r)}{n}" for r in range(65, 69) for n in range(1, 5)], "Belegt": [False]*16})
+if not os.path.exists(HISTORIE_CSV):
+    pd.DataFrame(columns=["Datum", "Fahrzeugnummer", "Änderung", "Bearbeiter"]).to_csv(HISTORIE_CSV, index=False)
 
-if os.path.exists(KALENDER_CSV):
-    kalender_df = pd.read_csv(KALENDER_CSV)
-else:
-    kalender_df = pd.DataFrame(columns=["Fahrzeug", "Datum", "Schicht"])
+if not os.path.exists(KALENDER_CSV):
+    pd.DataFrame(columns=["Fahrzeugnummer", "Geplant für", "Schicht", "Prioritaet"]).to_csv(KALENDER_CSV, index=False)
 
-# -----------------------------
-# App Navigation
-# -----------------------------
-st.sidebar.title(f"Willkommen {st.session_state['nutzer']['name']}")
-seite = st.sidebar.radio("Navigation", ["Planung", "Status", "Parkkarte", "Kalender", "Export", "Admin"] if rolle == "admin" else ["Planung", "Status", "Kalender", "Export"])
+st.title("🚗 Fahrzeugübersicht mit Priorisierung, Fortschritt & Kalender")
 
-# -----------------------------
-# Seite: Planung
-# -----------------------------
-if seite == "Planung":
-    st.header("📅 Fahrzeugplanung")
+if "Prioritaet" not in df.columns:
+    df["Prioritaet"] = "mittel"
+if "Fortschritt" not in df.columns:
+    df["Fortschritt"] = 0
 
-    uploaded_file = st.file_uploader("Excel-Datei mit Fahrzeugen hochladen", type=["xlsx"])
-    if uploaded_file:
-        neue_df = pd.read_excel(uploaded_file)
-        neue_df["Status"] = "offen"
-        neue_df["Bearbeitung gestartet"] = False
-        freie = parkplaetze[parkplaetze.Belegt == False]
-        for i, row in neue_df.iterrows():
-            if i < len(freie):
-                neue_df.at[i, "Parkplatz"] = freie.iloc[i]["Platz"]
-                parkplaetze.loc[parkplaetze.Platz == freie.iloc[i]["Platz"], "Belegt"] = True
-        df = pd.concat([df, neue_df], ignore_index=True)
-        df.to_csv(DATEN_CSV, index=False)
-        parkplaetze.to_csv(PARKPLATZ_CSV, index=False)
-        st.success("Import erfolgreich und Fahrzeuge eingeplant ✅")
+prio_filter = st.selectbox("Nach Priorität filtern:", ["alle", "hoch", "mittel", "niedrig"])
+zeige_df = df.copy()
+if prio_filter != "alle":
+    zeige_df = zeige_df[zeige_df["Prioritaet"] == prio_filter]
+st.dataframe(zeige_df)
 
-    st.dataframe(df)
+index = st.selectbox("Fahrzeug auswählen zur Bearbeitung:", df.index)
+prior = st.selectbox("Priorität setzen:", ["hoch", "mittel", "niedrig"], index=["hoch", "mittel", "niedrig"].index(df.at[index, "Prioritaet"]))
+fortschritt = st.slider("Fortschritt (%)", 0, 100, int(df.at[index, "Fortschritt"]))
+geplant_datum = st.date_input("📅 Geplant für:", datetime.date.today())
+schicht = st.selectbox("Schicht", ["Früh", "Spät", "Nacht"])
 
-# -----------------------------
-# Seite: Status
-# -----------------------------
-elif seite == "Status":
-    st.header("🛠️ Fahrzeugstatus")
-
-    if rolle != "admin":
-        df = df[df["Status"] != "abgeschlossen"]
-
-    for i, row in df.iterrows():
-        cols = st.columns([3, 2, 2, 2, 2])
-        cols[0].markdown(f"**{row['Fahrzeugnummer']}**")
-        cols[1].markdown(f"Status: {row['Status']}")
-        gestartet = cols[2].checkbox("Gestartet", value=row["Bearbeitung gestartet"], key=f"start_{i}")
-        if cols[3].button("Abschließen", key=f"done_{i}"):
-            df.at[i, "Status"] = "abgeschlossen"
-        df.at[i, "Bearbeitung gestartet"] = gestartet
-
-        if gestartet:
-            cols[4].markdown("✅ Schritte: Eingang ✅ - Prüfung ⬜ - Ausbau ⬜ - Abschluss ⬜")
-
+if st.button("✅ Änderungen speichern"):
+    df.at[index, "Prioritaet"] = prior
+    df.at[index, "Fortschritt"] = fortschritt
     df.to_csv(DATEN_CSV, index=False)
 
-# -----------------------------
-# Seite: Parkkarte
-# -----------------------------
-elif seite == "Parkkarte":
-    st.header("🅿️ Parkplatzübersicht")
-    for i in range(4):
-        cols = st.columns(4)
-        for j in range(4):
-            platz = f"{chr(65+i)}{j+1}"
-            belegt = False
-            if not parkplaetze[parkplaetze.Platz == platz].empty:
-                belegt = parkplaetze[parkplaetze.Platz == platz]["Belegt"].iloc[0]
-            farbe = "red" if belegt else "green"
-            cols[j].markdown(f"<div style='background-color:{farbe};color:white;padding:10px;text-align:center;border-radius:10px'>{platz}</div>", unsafe_allow_html=True)
+    kalender_df = pd.read_csv(KALENDER_CSV)
+    kalender_df = kalender_df[kalender_df.Fahrzeugnummer != df.at[index, "Fahrzeugnummer"]]
+    neuer_eintrag = pd.DataFrame([{
+        "Fahrzeugnummer": df.at[index, "Fahrzeugnummer"],
+        "Geplant für": geplant_datum,
+        "Schicht": schicht,
+        "Prioritaet": prior
+    }])
+    kalender_df = pd.concat([kalender_df, neuer_eintrag])
+    kalender_df.to_csv(KALENDER_CSV, index=False)
 
-# -----------------------------
-# Seite: Kalender
-# -----------------------------
-elif seite == "Kalender":
-    st.header("📆 Geplante Fahrzeuge")
-    st.dataframe(kalender_df)
+    empfaenger = lade_benutzer().query("rolle == 'supervisor'")["email"].tolist()
+    msg = f"Fahrzeug {df.at[index, 'Fahrzeugnummer']} aktualisiert:\nPriorität: {prior}\nFortschritt: {fortschritt}%\nGeplant für: {geplant_datum} ({schicht})"
+    sende_mail(empfaenger, msg)
+    st.success("Änderungen gespeichert und Benachrichtigung gesendet")
 
-    tag = st.date_input("Tag auswählen zur Anzeige")
-    if not kalender_df.empty:
-        geplante = kalender_df[kalender_df["Datum"] == tag.isoformat()]
-        st.subheader("Fahrzeuge an diesem Tag")
-        st.dataframe(geplante)
+    historie_df = pd.read_csv(HISTORIE_CSV)
+    historie_df = pd.concat([historie_df, pd.DataFrame([{"Datum": datetime.datetime.now(), "Fahrzeugnummer": df.at[index, "Fahrzeugnummer"], "Änderung": f"Priorität: {prior}, Fortschritt: {fortschritt}%", "Bearbeiter": st.session_state['nutzer']['name']}])])
+    historie_df.to_csv(HISTORIE_CSV, index=False)
 
-    with st.form("kalender_form"):
-        fzg = st.text_input("Fahrzeug")
-        datum = st.date_input("Geplant für")
-        schicht = st.selectbox("Schicht", ["Morgenschicht", "Spätschicht"])
-        speichern = st.form_submit_button("Eintragen")
-        if speichern:
-            kalender_df = pd.concat([kalender_df, pd.DataFrame([[fzg, datum.isoformat(), schicht]], columns=kalender_df.columns)])
-            kalender_df.to_csv(KALENDER_CSV, index=False)
-            st.success("Eingetragen ✅")
+st.subheader("📊 Fortschrittsanzeige")
+for i, row in zeige_df.iterrows():
+    st.markdown(f"**{row['Fahrzeugnummer']}** — Priorität: {row['Prioritaet']}")
+    st.progress(int(row["Fortschritt"]))
 
-    if rolle in ["admin", "schichtleiter"] and not kalender_df.empty:
-        st.subheader("🚚 Eintrag verschieben")
-        auszuwahl = kalender_df["Fahrzeug"].unique().tolist()
-        zu_verschieben = st.selectbox("Fahrzeug auswählen", auszuwahl)
-        neues_datum = st.date_input("Neues Datum")
-        neue_schicht = st.selectbox("Neue Schicht", ["Morgenschicht", "Spätschicht"])
-        if st.button("Verschieben"):
-            kalender_df.loc[kalender_df["Fahrzeug"] == zu_verschieben, ["Datum", "Schicht"]] = [neues_datum.isoformat(), neue_schicht]
-            kalender_df.to_csv(KALENDER_CSV, index=False)
-            st.success("Eintrag aktualisiert ✅")
+st.subheader("📆 Kalender Monatsansicht (farbig)")
+kalender_df = pd.read_csv(KALENDER_CSV)
+kalender_df["Geplant für"] = pd.to_datetime(kalender_df["Geplant für"])
+aktuell = datetime.date.today()
+monat_df = kalender_df[kalender_df["Geplant für"].dt.month == aktuell.month]
 
+kalendertage = {day: [] for day in range(1, 32)}
+for _, row in monat_df.iterrows():
+    tag = row["Geplant für"].day
+    style = ""
+    if row["Prioritaet"] == "hoch":
+        style = "color:red"
+    elif row["Prioritaet"] == "mittel":
+        style = "color:orange"
+    elif row["Prioritaet"] == "niedrig":
+        style = "color:green"
+    eintrag = f"<span style='{style}'>{row['Fahrzeugnummer']} ({row['Schicht']})</span>"
+    kalendertage[tag].append(eintrag)
 
-# -----------------------------
-# Seite: Export
-# -----------------------------
-elif seite == "Export":
-    st.header("📤 Export")
-    nur_heute = st.checkbox("Nur heutige Fahrzeuge exportieren")
-    export_df = df.copy()
-    if nur_heute:
-        export_df = export_df[export_df["Ankunft"] == datetime.date.today().isoformat()]
+for woche in calendar.monthcalendar(aktuell.year, aktuell.month):
+    cols = st.columns(7)
+    for i, tag in enumerate(woche):
+        if tag > 0:
+            with cols[i]:
+                tag_datum = datetime.date(aktuell.year, aktuell.month, tag)
+                if tag_datum < aktuell:
+                    st.markdown(f"### ~~{tag}~~")
+                else:
+                    st.markdown(f"### {tag}")
+                for eintrag in kalendertage.get(tag, []):
+                    st.markdown(eintrag, unsafe_allow_html=True)
 
-    if not export_df.empty:
-        output = BytesIO()
-        with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
-            export_df.to_excel(writer, index=False, sheet_name="Fahrzeuge")
-        st.download_button("⬇️ Excel-Datei herunterladen", data=output.getvalue(), file_name="fahrzeuge_export.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-    else:
-        st.info("Keine Daten zum Export verfügbar.")
+st.subheader("📜 Änderungshistorie")
+historie_df = pd.read_csv(HISTORIE_CSV)
+st.dataframe(historie_df.sort_values("Datum", ascending=False))
 
-# -----------------------------
-# Seite: Admin
-# -----------------------------
-if seite == "Admin" and rolle == "admin":
-    st.header("👥 Benutzerverwaltung")
-    benutzer_df = lade_benutzer()
-    with st.form("Neuen Benutzer anlegen"):
-        name = st.text_input("Name")
-        mail = st.text_input("E-Mail")
-        nutzername = st.text_input("Nutzername")
-        passwort = st.text_input("Standardpasswort")
-        rolle = st.selectbox("Rolle", ["admin", "werkstatt"])
-        senden = st.form_submit_button("Benutzer speichern")
-        if senden:
-            benutzer_df = pd.concat([benutzer_df, pd.DataFrame([[nutzername, passwort, rolle, name, mail]], columns=benutzer_df.columns)])
-            speichere_benutzer(benutzer_df)
-            st.success("Benutzer gespeichert ✅")
+st.subheader("📄 PDF-Export Fahrzeugstatus")
+if st.button("📥 Export als PDF"):
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_font("Arial", size=12)
+    pdf.cell(200, 10, txt="Fahrzeugstatusbericht", ln=True, align="C")
+    pdf.ln(10)
+    for _, row in df.iterrows():
+        text = f"{row['Fahrzeugnummer']} — Status: {row.get('Status','')}, Priorität: {row['Prioritaet']}, Fortschritt: {row['Fortschritt']}%"
+        pdf.multi_cell(0, 10, txt=text)
+    pdf_file = "fahrzeug_status.pdf"
+    pdf.output(pdf_file)
+    with open(pdf_file, "rb") as f:
+        st.download_button("⬇️ PDF Herunterladen", f, file_name=pdf_file)
 
+def sende_mail(empfaenger_liste, text):
+    if not empfaenger_liste:
+        return
+    msg = EmailMessage()
+    msg.set_content(text)
+    msg["Subject"] = "Fahrzeugstatus aktualisiert"
+    msg["From"] = "noreply@demontage.local"
+    msg["To"] = ", ".join(empfaenger_liste)
+    try:
+        with smtplib.SMTP("localhost") as server:
+            server.send_message(msg)
+    except Exception as e:
+        st.warning(f"Fehler beim Senden der E-Mail: {e}")
 
-
-
-# ----------------------------------------
-# Erweiterung: Visuelle Erinnerung & Filter
-# ----------------------------------------
-
-if seite == "Planung":
-    ...
-
-    # Filteroptionen
-    schicht_filter = st.selectbox("Nach Schicht filtern", ["Alle"] + df["Schicht"].dropna().unique().tolist())
-    bearbeiter_filter = st.selectbox("Nach Bearbeiter filtern", ["Alle"] + df["Bearbeiter"].dropna().unique().tolist())
-
-    if schicht_filter != "Alle":
-        df = df[df["Schicht"] == schicht_filter]
-    if bearbeiter_filter != "Alle":
-        df = df[df["Bearbeiter"] == bearbeiter_filter]
-
-    st.markdown("### 🔔 Visuelle Erinnerung: Offene Fahrzeuge ohne Bearbeitung")
-    offene = df[(df["Status"] == "offen") & (df["Bearbeitung gestartet"] == False)]
-    if not offene.empty:
-        st.warning(f"⚠️ {len(offene)} Fahrzeuge sind noch nicht in Bearbeitung gestartet.")
-    else:
-        st.success("✅ Alle Fahrzeuge wurden bereits begonnen oder abgeschlossen.")
-
-
-
-
-
-
-
-# -----------------------------
-# Erweiterung: Fortschrittsanzeige
-# -----------------------------
-def berechne_fortschritt(zeile):
-    schritte = ["Öl ablassen", "Batterie entfernen", "Flüssigkeiten trennen", "Ausbau", "Abschluss"]
-    erledigt = sum([1 for s in schritte if zeile.get(s)])
-    return int((erledigt / len(schritte)) * 100)
-
-# -----------------------------
-# Erweiterung: Protokollierung
-# -----------------------------
-import csv
-from datetime import datetime
-
-def protokolliere_aenderung(fahrzeugnummer, feld, alt, neu, bearbeiter):
-    with open("historie.csv", "a", newline="") as f:
-        writer = csv.writer(f)
-        writer.writerow([datetime.now().isoformat(), fahrzeugnummer, feld, alt, neu, bearbeiter])
-
-# Diese Funktionen kannst du dann z.B. in der Status-Seite verwenden:
-# if alt != neu:
-#     protokolliere_aenderung(row["Fahrzeugnummer"], "Status", alt, neu, nutzername)
-
-
-
-
-
-# === Erweiterungen ===
-
-
-# Erweiterung: Fortschrittsanzeige
-def berechne_fortschritt(zeile):
-    schritte = ["Öl ablassen", "Batterie entfernen", "Flüssigkeiten trennen", "Ausbau", "Abschluss"]
-    erledigt = sum([1 for s in schritte if zeile.get(s)])
-    return int((erledigt / len(schritte)) * 100) if schritte else 0
-
-# Erweiterung: Historie
-import csv
-from datetime import datetime
-def protokolliere_aenderung(fzg, feld, alt, neu, nutzer):
-    with open("historie.csv", "a", newline="") as f:
-        writer = csv.writer(f)
-        writer.writerow([datetime.now().isoformat(), fzg, feld, alt, neu, nutzer])
