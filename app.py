@@ -5,6 +5,8 @@ import datetime
 import calendar
 import qrcode
 from fpdf import FPDF
+import smtplib
+from email.mime.text import MIMEText
 
 # Pfade
 USER_DB = "benutzer.csv"
@@ -14,6 +16,11 @@ PARKPLATZ_CSV = "parkplaetze.csv"
 KALENDER_CSV = "kalender.csv"
 SUBTASK_CSV = "subtasks.csv"
 
+SMTP_SERVER = "smtp.example.com"
+SMTP_PORT = 587
+SMTP_USER = "your@email.com"
+SMTP_PASS = "password"
+
 @st.cache_data
 def lade_benutzer():
     return pd.read_csv(USER_DB) if os.path.exists(USER_DB) else pd.DataFrame(columns=["nutzername", "passwort", "rolle", "name", "email"])
@@ -22,26 +29,76 @@ def lade_benutzer():
 def lade_subtasks():
     return pd.read_csv(SUBTASK_CSV) if os.path.exists(SUBTASK_CSV) else pd.DataFrame(columns=["Fahrzeugnummer", "Aufgabe", "Status", "Prioritaet"])
 
-def speichere_subtasks(df):
-    df.to_csv(SUBTASK_CSV, index=False)
+def sende_mail(empfaenger, betreff, nachricht):
+    try:
+        msg = MIMEText(nachricht)
+        msg["Subject"] = betreff
+        msg["From"] = SMTP_USER
+        msg["To"] = empfaenger
+        with smtplib.SMTP(SMTP_SERVER, SMTP_PORT) as server:
+            server.starttls()
+            server.login(SMTP_USER, SMTP_PASS)
+            server.send_message(msg)
+        return True
+    except Exception as e:
+        print("E-Mail Fehler:", e)
+        return False
 
+def pruefe_erinnerung():
+    df = lade_subtasks()
+    benutzer = lade_benutzer()
+    df = df[df["Status"] != "erledigt"]
+    df = df[df["Prioritaet"] == "hoch"]
+    if not df.empty:
+        for empfaenger in benutzer["email"].dropna().tolist():
+            sende_mail(empfaenger, "Offene Hoch-Prioritätsaufgaben", "Bitte überprüfen Sie die Aufgabenliste")
+
+@st.cache_data
 def lade_fahrzeuge():
-    return pd.read_csv(DATEN_CSV) if os.path.exists(DATEN_CSV) else pd.DataFrame(columns=["Fahrzeugnummer", "Status", "Fortschritt", "Prioritaet", "Bearbeiter", "Parkplatz"])
+    if os.path.exists(DATEN_CSV):
+        df = pd.read_csv(DATEN_CSV)
+        for col in ["Fahrzeugnummer", "Status", "Fortschritt", "Prioritaet", "Bearbeiter", "Parkplatz"]:
+            if col not in df.columns:
+                df[col] = ""
+        return df
+    return pd.DataFrame(columns=["Fahrzeugnummer", "Status", "Fortschritt", "Prioritaet", "Bearbeiter", "Parkplatz"])
 
 def lade_parkplaetze():
     if os.path.exists(PARKPLATZ_CSV):
         return pd.read_csv(PARKPLATZ_CSV)
-    return pd.DataFrame({"Platz": [f"P{n}" for n in range(1, 41)], "Belegt": [False]*40})
+    zeilen = ['A', 'B', 'C', 'D']
+    spalten = range(1, 5)
+    plaetze = [f"{z}{s}" for z in zeilen for s in spalten]
+    return pd.DataFrame({"Platz": plaetze, "Belegt": [False] * len(plaetze)})
+
+def visuelle_parkkarte(df):
+    belegung = df.set_index("Parkplatz")["Fahrzeugnummer"].to_dict()
+    for zeile in ['A', 'B', 'C', 'D']:
+        cols = st.columns(4)
+        for i, spalte in enumerate(range(1, 5)):
+            platz = f"{zeile}{spalte}"
+            with cols[i]:
+                if platz in belegung:
+                    st.markdown(f"### {platz} \n**{belegung[platz]}**", unsafe_allow_html=True)
+                else:
+                    st.markdown(f"### {platz} \n🟩 frei", unsafe_allow_html=True)
 
 def lade_kalender():
-    return pd.read_csv(KALENDER_CSV) if os.path.exists(KALENDER_CSV) else pd.DataFrame(columns=["Fahrzeugnummer", "Geplant für", "Schicht", "Prioritaet"])
+    if os.path.exists(KALENDER_CSV):
+        df = pd.read_csv(KALENDER_CSV)
+        if "Geplant für" in df.columns:
+            df["Geplant für"] = pd.to_datetime(df["Geplant für"], errors="coerce")
+        return df
+    return pd.DataFrame(columns=["Fahrzeugnummer", "Geplant für", "Schicht", "Prioritaet"])
 
 def export_historie_pdf():
-    df = pd.read_csv(HISTORIE_CSV) if os.path.exists(HISTORIE_CSV) else pd.DataFrame()
+    if not os.path.exists(HISTORIE_CSV):
+        return
+    df = pd.read_csv(HISTORIE_CSV)
     pdf = FPDF(); pdf.add_page(); pdf.set_font("Arial", size=11)
     pdf.cell(200, 10, "Änderungshistorie", ln=True, align="C"); pdf.ln(5)
     for _, row in df.iterrows():
-        txt = f"{row['Datum']} — {row['Fahrzeugnummer']} — {row['Änderung']} durch {row['Bearbeiter']}"
+        txt = f"{row.get('Datum', '-')} — {row.get('Fahrzeugnummer', '-')} — {row.get('Änderung', '-')} durch {row.get('Bearbeiter', '-')}"
         pdf.multi_cell(0, 8, txt=txt)
     with open("historie_export.pdf", "wb") as f: pdf.output(f)
     with open("historie_export.pdf", "rb") as f:
@@ -52,7 +109,11 @@ def kalender_export():
     pdf = FPDF(); pdf.add_page(); pdf.set_font("Arial", size=10)
     pdf.cell(200, 10, "Kalenderübersicht Fahrzeuge", ln=True, align="C")
     for _, row in df.iterrows():
-        pdf.cell(0, 8, f"{row['Geplant für']} – {row['Fahrzeugnummer']} – {row['Schicht']} – {row['Prioritaet']}", ln=True)
+        geplant = row.get("Geplant für", "-")
+        fz = row.get("Fahrzeugnummer", "-")
+        schicht = row.get("Schicht", "-")
+        prio = row.get("Prioritaet", "-")
+        pdf.cell(0, 8, f"{geplant} – {fz} – {schicht} – {prio}", ln=True)
     pdf.output("kalender_export.pdf")
     with open("kalender_export.pdf", "rb") as f:
         st.sidebar.download_button("📅 Kalender PDF", f, file_name="kalender_export.pdf")
@@ -76,143 +137,12 @@ if not st.session_state.login:
                 st.error("❌ Falsches Passwort")
         else:
             st.error("❌ Nutzer nicht gefunden")
-
     st.stop()
 
-st.sidebar.title("🚗 Navigation")
-seiten = ["Fahrzeugbearbeitung", "Subtasks", "Kalender", "Parkkarte", "Import", "QR-Codes", "Export"]
-if st.session_state["nutzer"]["rolle"] == "admin":
-    seiten.append("Benutzerverwaltung")
-seite = st.sidebar.markdown(f"👋 Willkommen, **{st.session_state['nutzer']['name']}**")
-seite = st.sidebar.radio("Seite auswählen", seiten)
+# Nur Schichtleiter erhalten Erinnerung automatisch
+if st.session_state["nutzer"]["rolle"] == "schichtleiter":
+    pruefe_erinnerung()
 
-if st.sidebar.button("🔒 Logout"):
-    st.session_state.login = False
-    st.experimental_rerun()
-
-benutzer_df = lade_benutzer()
-df = lade_fahrzeuge()
-parkplaetze = lade_parkplaetze()
-
-# Seiteninhalt
-if seite == "Fahrzeugbearbeitung":
-    st.title("🚗 Fahrzeugbearbeitung")
-    if not df.empty:
-        index = st.selectbox("Fahrzeug wählen", df.index, format_func=lambda i: df.at[i, "Fahrzeugnummer"])
-        df.at[index, "Status"] = st.selectbox("Status", ["Angekommen", "Check-In", "Demontage", "Sortierung", "Fertig"], index=0)
-        df.at[index, "Prioritaet"] = st.selectbox("Priorität", ["hoch", "mittel", "niedrig"], index=1)
-        df.at[index, "Fortschritt"] = st.slider("Fortschritt %", 0, 100, int(df.at[index, "Fortschritt"]))
-        df.at[index, "Bearbeiter"] = st.selectbox("Bearbeiter", ["-"] + benutzer_df[benutzer_df.rolle == "mitarbeiter"]["name"].tolist(), index=0)
-        freie = parkplaetze[~parkplaetze.Belegt]["Platz"].tolist()
-        aktuell = df.at[index, "Parkplatz"] if pd.notna(df.at[index, "Parkplatz"]) else ""
-        alle = sorted(set(freie + [aktuell])) if aktuell else freie
-        df.at[index, "Parkplatz"] = st.selectbox("🅿️ Parkplatz", alle, index=alle.index(aktuell) if aktuell in alle else 0)
-        if st.button("💾 Speichern"):
-            df.to_csv(DATEN_CSV, index=False)
-            st.success("Gespeichert")
-
-elif seite == "Subtasks":
-    st.title("🧩 Aufgaben je Fahrzeug")
-    sub_df = lade_subtasks()
-    selected = st.selectbox("Fahrzeug wählen", df["Fahrzeugnummer"].unique())
-    fz_tasks = sub_df[sub_df.Fahrzeugnummer == selected]
-    for i, row in fz_tasks.iterrows():
-        c1, c2, c3 = st.columns([4, 2, 2])
-        with c1:
-            sub_df.at[i, "Aufgabe"] = st.text_input(f"Aufgabe {i}", row["Aufgabe"], key=f"a{i}")
-        with c2:
-            sub_df.at[i, "Status"] = st.selectbox("Status", ["offen", "in Arbeit", "erledigt"], index=["offen", "in Arbeit", "erledigt"].index(row["Status"]), key=f"s{i}")
-        with c3:
-            sub_df.at[i, "Prioritaet"] = st.selectbox("Priorität", ["hoch", "mittel", "niedrig"], index=["hoch", "mittel", "niedrig"].index(row["Prioritaet"]), key=f"p{i}")
-    if st.button("📌 Speichern"):
-        speichere_subtasks(sub_df)
-        st.success("Aufgaben gespeichert")
-
-elif seite == "Kalender":
-    st.title("📅 Monatskalender")
-    kalender = lade_kalender()
-    kalender["Geplant für"] = pd.to_datetime(kalender["Geplant für"], errors="coerce")
-    aktuell = datetime.date.today()
-    monat_df = kalender[kalender["Geplant für"].dt.month == aktuell.month]
-    tage = {i: [] for i in range(1, 32)}
-    for _, row in monat_df.iterrows():
-        tag = row["Geplant für"].day
-        farbe = "red" if row["Prioritaet"] == "hoch" else "orange" if row["Prioritaet"] == "mittel" else "green"
-        eintrag = f"<span style='color:{farbe}'>{row['Fahrzeugnummer']} ({row['Schicht']})</span>"
-        tage[tag].append(eintrag)
-    for woche in calendar.monthcalendar(aktuell.year, aktuell.month):
-        cols = st.columns(7)
-        for i, tag in enumerate(woche):
-            with cols[i]:
-                if tag > 0:
-                    st.markdown(f"### {tag}")
-                    for eintrag in tage[tag]:
-                        st.markdown(eintrag, unsafe_allow_html=True)
-
-elif seite == "Parkkarte":
-    st.title("📍 Parkplätze")
-    belegung = df.set_index("Parkplatz")["Fahrzeugnummer"].to_dict()
-    for i in range(0, len(parkplaetze), 10):
-        cols = st.columns(10)
-        for j, platz in enumerate(parkplaetze["Platz"][i:i+10]):
-            with cols[j]:
-                label = belegung.get(platz, "🟩 frei")
-                st.markdown(f"**🟥 {platz}**\n{label}" if label != "🟩 frei" else platz)
-
-elif seite == "Import":
-    st.title("📥 Excel Import")
-    up = st.file_uploader("Excel hochladen", type="xlsx")
-    if up:
-        try:
-            daten = pd.read_excel(up)
-            daten["Bearbeiter"] = ""
-            daten["Parkplatz"] = None
-            freie = parkplaetze[~parkplaetze.Belegt].reset_index()
-            for i in range(min(len(daten), len(freie))):
-                daten.loc[i, "Parkplatz"] = freie.loc[i, "Platz"]
-                parkplaetze.loc[freie.loc[i, "index"], "Belegt"] = True
-            df = pd.concat([df, daten], ignore_index=True)
-            df.to_csv(DATEN_CSV, index=False)
-            parkplaetze.to_csv(PARKPLATZ_CSV, index=False)
-            st.success("Import erfolgreich")
-        except Exception as e:
-            st.error(f"Fehler: {e}")
-
-elif seite == "QR-Codes":
-    st.title("📸 QR-Codes für Fahrzeuge")
-    for _, row in df.iterrows():
-        st.markdown(f"**{row['Fahrzeugnummer']}**")
-        st.image(qrcode.make(row['Fahrzeugnummer']).resize((150, 150)))
-
-elif seite == "Export":
-    st.title("📤 Export")
-    kalender_export()
-    export_historie_pdf()
-
-elif seite == "Benutzerverwaltung" and st.session_state["nutzer"]["rolle"] == "admin":
-    st.subheader("👥 Benutzerverwaltung")
-    benutzer_df = lade_benutzer()
-    with st.expander("➕ Benutzer hinzufügen"):
-        name = st.text_input("Name")
-        user = st.text_input("Benutzername")
-        pw = st.text_input("Passwort")
-        mail = st.text_input("E-Mail")
-        rolle = st.selectbox("Rolle", ["admin", "schichtleiter", "mitarbeiter"])
-        if st.button("Benutzer speichern"):
-            if user in benutzer_df.nutzername.values:
-                st.warning("Benutzername existiert bereits")
-            else:
-                neu = pd.DataFrame([[user, pw, rolle, name, mail]], columns=benutzer_df.columns)
-                benutzer_df = pd.concat([benutzer_df, neu], ignore_index=True)
-                benutzer_df.to_csv(USER_DB, index=False)
-                st.success("Benutzer hinzugefügt")
-
-    with st.expander("❌ Benutzer löschen"):
-        auswahl = st.selectbox("Benutzer wählen", benutzer_df.nutzername.tolist())
-        if st.button("🗑️ Löschen"):
-            benutzer_df = benutzer_df[benutzer_df.nutzername != auswahl]
-            benutzer_df.to_csv(USER_DB, index=False)
-            st.success("Benutzer gelöscht")
 
 
 
